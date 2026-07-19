@@ -120,6 +120,11 @@ picks the plugin up.
 | `TodomanSettings.qml` | Settings page shown in DMS |
 | `ics_edit.py` | Rename summary / clear due / clear priority in an `.ics` |
 
+## AI usage
+
+The frontend (the QML UI) was built with the help of AI, following
+DankMaterialShell's Material Design scheme so it matches the rest of the shell.
+
 ## License
 
 MIT.
