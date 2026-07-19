@@ -1,0 +1,16 @@
+{
+    "id": "dankTodoman",
+    "name": "Todoman Tasks",
+    "description": "CalDAV tasks in the bar via todoman: list, complete, and create todos with a popout.",
+    "version": "0.2.0",
+    "license": "MIT",
+    "author": "shochraos",
+    "icon": "checklist",
+    "type": "widget",
+    "capabilities": ["dankbar-widget"],
+    "component": "./TodomanWidget.qml",
+    "settings": "./TodomanSettings.qml",
+    "requires_dms": ">=1.5",
+    "requires": ["todo"],
+    "permissions": ["settings_read", "settings_write", "process"]
+}
