@@ -9,7 +9,7 @@ PluginSettings {
     StringSetting {
         settingKey: "listFilter"
         label: "Lists"
-        description: "Comma-separated list names to show (empty = all lists)"
+        description: "Comma-separated list names to watch (empty = all). The dropdown in the popout header narrows the view within these."
         placeholder: "work, personal"
         defaultValue: ""
     }

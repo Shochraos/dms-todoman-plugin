@@ -22,6 +22,7 @@ PluginComponent {
     property var tasks: []
     property int openCount: 0
     property var lists: []                 // ["work", "personal"]
+    property string viewList: ""           // "" = every watched list (session-only)
     property bool isLoading: true
     property bool hasError: false
     property string errorText: ""
@@ -139,6 +140,68 @@ PluginComponent {
 
     function isOverdue(ts) { return ts ? (ts * 1000) < Date.now() : false; }
 
+    // ── List scoping ────────────────────────────────────────────────
+    // `listFilter` decides which lists the widget watches — it is passed to
+    // `todo list`. `viewList` narrows the view *within* that, client-side, so
+    // switching lists costs no process and leaves the bar's count alone.
+    readonly property string viewAllLabel: "All lists"
+
+    // todoman resolves list names case-insensitively, so listFilter entries
+    // need not match the canonical casing.
+    function _sameList(a, b) { return !!a && !!b && a.toLowerCase() === b.toLowerCase(); }
+
+    function _isWatched(name) {
+        var wanted = listArgs();
+        if (!wanted.length) return true;
+        for (var i = 0; i < wanted.length; i++)
+            if (_sameList(name, wanted[i])) return true;
+        return false;
+    }
+
+    // `todo lists` only exists in todoman >= 4.7 and fetchLists() swallows the
+    // failure on older versions, so union it with the list names the tasks
+    // themselves carry. `lists` is still primary: it also reports lists that
+    // currently hold no tasks.
+    readonly property var knownLists: {
+        var out = lists.slice();
+        for (var i = 0; i < tasks.length; i++) {
+            var n = tasks[i].list;
+            if (n && out.indexOf(n) < 0) out.push(n);
+        }
+        return out;
+    }
+
+    readonly property var viewOptions: {
+        var out = [viewAllLabel];
+        for (var i = 0; i < knownLists.length; i++)
+            if (_isWatched(knownLists[i])) out.push(knownLists[i]);
+        return out;
+    }
+
+    readonly property var visibleTasks: {
+        if (!viewList) return tasks;
+        var out = [];
+        for (var i = 0; i < tasks.length; i++)
+            if (tasks[i].list === viewList) out.push(tasks[i]);
+        return out;
+    }
+
+    readonly property int visibleOpenCount: {
+        if (!viewList) return openCount;
+        var n = 0;
+        for (var i = 0; i < visibleTasks.length; i++)
+            if (!visibleTasks[i].completed) n++;
+        return n;
+    }
+
+    // The viewed list can stop being watched — deleted, renamed, or dropped
+    // from listFilter. Show everything again rather than an unexplained void.
+    onViewOptionsChanged: if (viewList && viewOptions.indexOf(viewList) < 0) viewList = ""
+
+    // Viewing one list makes it the target for new tasks too, but never
+    // retarget a task that is already open in the edit form.
+    onViewListChanged: if (viewList && !isEditing) draftList = viewList
+
     // ── Due-based grouping ──────────────────────────────────────────
     // Tasks are split into fixed buckets by their due date; empty
     // buckets are dropped so only relevant sections render.
@@ -166,9 +229,10 @@ PluginComponent {
     // [{ label, tasks: [...] }] in dueGroupOrder, non-empty groups only.
     readonly property var groupedTasks: {
         var buckets = {};
-        for (var i = 0; i < tasks.length; i++) {
-            var k = dueGroupKey(tasks[i].due);
-            (buckets[k] || (buckets[k] = [])).push(tasks[i]);
+        var src = visibleTasks;
+        for (var i = 0; i < src.length; i++) {
+            var k = dueGroupKey(src[i].due);
+            (buckets[k] || (buckets[k] = [])).push(src[i]);
         }
         var out = [];
         for (var g = 0; g < dueGroupOrder.length; g++) {
@@ -215,6 +279,15 @@ PluginComponent {
         _listsBuf = "";
         listsProc.command = ["todo", "--porcelain", "lists"];
         listsProc.running = true;
+    }
+
+    // First list wins unless defaultList is one of them; runs after either
+    // fetch so it also works where `todo lists` is unavailable.
+    function _seedDraftList() {
+        if (draftList || !knownLists.length) return;
+        for (var i = 0; i < knownLists.length; i++)
+            if (_sameList(knownLists[i], defaultList)) { draftList = knownLists[i]; return; }
+        draftList = knownLists[0];
     }
 
     function addTask(summary) {
@@ -345,6 +418,7 @@ PluginComponent {
                 root.tasks = arr;
                 root.openCount = open;
                 root.hasError = false;
+                root._seedDraftList();
             } catch (e) {
                 root.hasError = true;
                 root.errorText = "Failed to parse todo output: " + e;
@@ -361,9 +435,7 @@ PluginComponent {
             try {
                 var arr = JSON.parse(root._listsBuf.trim() || "[]");
                 root.lists = arr;
-                if (!root.draftList && arr.length > 0)
-                    root.draftList = (root.defaultList && arr.indexOf(root.defaultList) >= 0)
-                        ? root.defaultList : arr[0];
+                root._seedDraftList();
             } catch (e) {}
         }
     }
@@ -503,18 +575,42 @@ PluginComponent {
         PopoutComponent {
             id: popout
             headerText: "Tasks"
-            detailsText: root.openCount + (root.openCount === 1 ? " open task" : " open tasks")
+            detailsText: root.visibleOpenCount + (root.visibleOpenCount === 1 ? " open task" : " open tasks")
+                         + (root.viewList ? " in " + root.viewList : "")
             showCloseButton: true
             closePopout: function () { root.closePopout() }
 
-            // Refresh button in the header
+            // Refresh + view filter in the header
             headerActions: Component {
-                DankActionButton {
-                    iconName: "refresh"
-                    iconColor: Theme.surfaceVariantText
-                    buttonSize: 30
-                    tooltipText: "Refresh"
-                    onClicked: { root.fetchTasks(); root.fetchLists(); }
+                Row {
+                    spacing: Theme.spacingXS
+
+                    DankActionButton {
+                        anchors.verticalCenter: parent.verticalCenter
+                        iconName: "refresh"
+                        iconColor: Theme.surfaceVariantText
+                        buttonSize: 30
+                        tooltipText: "Refresh"
+                        onClicked: { root.fetchTasks(); root.fetchLists(); }
+                    }
+
+                    DankDropdown {
+                        id: viewFilter
+                        anchors.verticalCenter: parent.verticalCenter
+                        visible: root.viewOptions.length > 1
+                        dropdownWidth: 124
+                        alignPopupRight: true
+                        options: root.viewOptions
+                        onValueChanged: value => root.viewList = (value === root.viewAllLabel ? "" : value)
+
+                        // DankDropdown writes currentValue imperatively on pick,
+                        // which would destroy a plain binding.
+                        Binding {
+                            target: viewFilter
+                            property: "currentValue"
+                            value: root.viewList || root.viewAllLabel
+                        }
+                    }
                 }
             }
 
@@ -617,11 +713,16 @@ PluginComponent {
 
                                 DankDropdown {
                                     id: listDrop
-                                    visible: root.lists.length > 0
+                                    visible: root.knownLists.length > 0
                                     dropdownWidth: 130
-                                    currentValue: root.draftList
-                                    options: root.lists
+                                    options: root.knownLists
                                     onValueChanged: value => root.draftList = value
+
+                                    Binding {
+                                        target: listDrop
+                                        property: "currentValue"
+                                        value: root.draftList
+                                    }
                                 }
 
                                 StyledRect {
@@ -926,9 +1027,10 @@ PluginComponent {
                     // ── Empty / error / loading state ──────────────
                     StyledText {
                         width: parent.width
-                        visible: root.tasks.length === 0
+                        visible: root.visibleTasks.length === 0
                         text: root.hasError ? root.errorText
                               : root.isLoading ? "Loading tasks…"
+                              : root.viewList ? "Nothing in " + root.viewList + " yet ✨"
                               : "No tasks. Add one above ✨"
                         wrapMode: Text.WordWrap
                         color: root.hasError ? Theme.error : Theme.surfaceVariantText
@@ -1021,7 +1123,7 @@ PluginComponent {
                                         }
                                         Row {
                                             spacing: Theme.spacingS
-                                            visible: modelData.due || modelData.list
+                                            visible: !!modelData.due || (!!modelData.list && !root.viewList)
                                             StyledText {
                                                 visible: !!modelData.due
                                                 text: root.formatDue(modelData.due)
@@ -1029,7 +1131,7 @@ PluginComponent {
                                                 font.pixelSize: Theme.fontSizeSmall
                                             }
                                             StyledText {
-                                                visible: !!modelData.list
+                                                visible: !!modelData.list && !root.viewList
                                                 text: "· " + modelData.list
                                                 color: Theme.surfaceTextMedium
                                                 font.pixelSize: Theme.fontSizeSmall

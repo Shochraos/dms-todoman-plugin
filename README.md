@@ -46,15 +46,20 @@ here; if `todo list` works in your terminal, this plugin will work.
 - **Inline edit** — change summary, list (`todo move`), due date, and priority;
   clearing due/priority is handled by the bundled `ics_edit.py`.
 - **Delete** with an inline confirm step (`todo delete --yes`).
-- Each row shows a **priority dot**, the **due date**, and the **list name**.
-- Configurable list filter, sort field, refresh interval, and a show-completed
+- Each row shows a **priority dot**, the **due date**, and the **list name** —
+  the list name is hidden while the view is already narrowed to one list.
+- **Per-list view** — an `All lists` / per-list dropdown in the popout header
+  filters what you see instantly. It filters client-side, so switching lists
+  spawns no process, cannot fail on a stale list name, and leaves the bar's
+  task count global. It is view state, not a setting: it resets with the shell.
+- Configurable watched lists, sort field, refresh interval, and a show-completed
   toggle (see [Settings](#settings)).
 
 ## Settings
 
 | Key               | Meaning                                              | Default |
 |-------------------|------------------------------------------------------|---------|
-| `listFilter`      | Comma-separated list names to show (empty = all)     | `""`    |
+| `listFilter`      | Comma-separated list names the widget **watches** (empty = all) | `""`    |
 | `defaultList`     | Default list for new tasks (empty = todoman default) | `""`    |
 | `sortField`       | Order within each group: `due` \| `priority` \| `created_at` \| `summary` | `due` |
 | `showCompleted`   | Include done/cancelled tasks                         | `false` |
@@ -62,6 +67,12 @@ here; if `todo list` works in your terminal, this plugin will work.
 
 Grouping by due date is always on; `sortField` controls the order of tasks
 *within* each group.
+
+`listFilter` and the header dropdown are different scopes and never overlap:
+`listFilter` decides which lists the widget fetches at all — it is passed
+straight to `todo list` — while the dropdown narrows the view within them.
+A list that is dropped from `listFilter`, deleted, or renamed resets the view
+to *All lists* rather than leaving you staring at an empty popout.
 
 ## Installation
 
@@ -107,6 +118,12 @@ picks the plugin up.
   todoman's own** — the same ones `todo list` / `todo done` print — so completing
   or editing a task uses ids that stay valid. The list is refetched after every
   create/complete/edit so ids never go stale.
+- List names come from `todo lists`, which only exists in **todoman ≥ 4.7**. On
+  older versions that call fails silently, so the names are recovered from the
+  tasks themselves; the only thing lost is a list that currently holds no tasks.
+  Filtering by list happens inside the widget, never by refetching with
+  `todo list <name>` — that would make the bar's count follow the filter and
+  would hard-fail on a list that vanished between two refreshes.
 - All mutations go through the `todo` CLI, except renaming a summary and clearing
   a due date or priority, which the CLI can't do directly; those go through
   `ics_edit.py`, a small pass over the task's `.ics` file.
