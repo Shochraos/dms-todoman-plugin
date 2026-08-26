@@ -547,6 +547,7 @@ PluginComponent {
     // ── Bar pill (horizontal) ───────────────────────────────────────
     horizontalBarPill: Component {
         StyledRect {
+            width: Math.min(pillRow.implicitWidth + Theme.spacingM * 2, 320)
             implicitWidth: pillRow.implicitWidth + Theme.spacingM * 2
             height: parent.widgetThickness
             radius: Theme.cornerRadius
@@ -565,7 +566,26 @@ PluginComponent {
                 }
                 StyledText {
                     visible: root.openCount > 0
-                    text: root.openCount + (root.nearestDueTask ? " · " + (root.nearestDueTask.summary || "(no summary)") + " · " + root.remainingTime(root.nearestDueTask.due) : "")
+                    text: root.openCount
+                    color: Theme.surfaceText
+                    font.pixelSize: Theme.fontSizeMedium
+                    font.weight: Font.Medium
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+                StyledText {
+                    visible: root.openCount > 0 && root.nearestDueTask
+                    width: 150
+                    text: "· " + (root.nearestDueTask.summary || "(no summary)")
+                    wrapMode: Text.NoWrap
+                    elide: Text.ElideRight
+                    color: Theme.surfaceText
+                    font.pixelSize: Theme.fontSizeMedium
+                    font.weight: Font.Medium
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+                StyledText {
+                    visible: root.openCount > 0 && root.nearestDueTask
+                    text: "· " + root.remainingTime(root.nearestDueTask.due)
                     color: Theme.surfaceText
                     font.pixelSize: Theme.fontSizeMedium
                     font.weight: Font.Medium
