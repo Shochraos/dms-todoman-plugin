@@ -574,7 +574,7 @@ PluginComponent {
                 }
                 StyledText {
                     visible: root.openCount > 0 && root.nearestDueTask
-                    width:  280
+                    width: Math.min(implicitWidth, 280)
                     text: "· " + (root.nearestDueTask.summary || "(no summary)")
                     wrapMode: Text.NoWrap
                     elide: Text.ElideRight
