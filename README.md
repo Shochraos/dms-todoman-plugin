@@ -28,7 +28,11 @@ here; if `todo list` works in your terminal, this plugin will work.
 
 ## Features
 
-- **Bar pill** with a checklist icon, live open-task count, nearest-due task title, and its remaining time.
+- **Bar pill** with a checklist icon and a live open-task count. Optionally
+  (setting *Show next task in the bar*) it also carries the next due task and a
+  countdown — the soonest task still ahead, falling back to the most recently
+  missed one when nothing is upcoming. The title is truncated so the pill cannot
+  push the rest of the bar around; a vertical bar shows the countdown only.
 - **Due-date grouping** in the popout — tasks are split into fixed sections,
   and empty sections are hidden:
 
@@ -63,6 +67,7 @@ here; if `todo list` works in your terminal, this plugin will work.
 | `defaultList`     | Default list for new tasks (empty = todoman default) | `""`    |
 | `sortField`       | Order within each group: `due` \| `priority` \| `created_at` \| `summary` | `due` |
 | `showCompleted`   | Include done/cancelled tasks                         | `false` |
+| `showNearestTask` | Append the next due task + countdown to the bar pill | `false` |
 | `refreshInterval` | Reload interval, in minutes                          | `5`     |
 
 Grouping by due date is always on; `sortField` controls the order of tasks

@@ -42,6 +42,13 @@ PluginSettings {
         defaultValue: false
     }
 
+    ToggleSetting {
+        settingKey: "showNearestTask"
+        label: "Show next task in the bar"
+        description: "Append the next due task and a countdown to the bar pill. Overdue tasks are only shown when nothing is still upcoming."
+        defaultValue: false
+    }
+
     SliderSetting {
         settingKey: "refreshInterval"
         label: "Refresh interval"
