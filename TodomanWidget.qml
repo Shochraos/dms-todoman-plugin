@@ -21,6 +21,8 @@ PluginComponent {
     // ── Runtime state ───────────────────────────────────────────────
     property var tasks: []
     property int openCount: 0
+    property real clockTick: Date.now()
+    readonly property var nearestDueTask: findNearestDueTask(tasks)
     property var lists: []                 // ["work", "personal"]
     property string viewList: ""           // "" = every watched list (session-only)
     property bool isLoading: true
@@ -85,6 +87,13 @@ PluginComponent {
         onTriggered: root.fetchTasks()
     }
 
+    Timer {
+        interval: 60000
+        running: true
+        repeat: true
+        onTriggered: root.clockTick = Date.now()
+    }
+
     // ── Date/time helpers ───────────────────────────────────────────
     function pad2(n) { return ("0" + n).slice(-2); }
     readonly property var _months: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -120,10 +129,15 @@ PluginComponent {
         draftDueEnabled = true;
     }
 
-    // due is a unix timestamp in seconds (or null).
+    // due may be a Unix timestamp in seconds or milliseconds.
+    function dueTimestampMs(ts) {
+        if (!ts) return 0;
+        return ts > 100000000000 ? ts : ts * 1000;
+    }
+
     function formatDue(ts) {
         if (!ts) return "";
-        var d = new Date(ts * 1000);
+        var d = new Date(dueTimestampMs(ts));
         var now = new Date();
         var startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
         var dueDay = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
@@ -138,7 +152,29 @@ PluginComponent {
         return label;
     }
 
-    function isOverdue(ts) { return ts ? (ts * 1000) < Date.now() : false; }
+    function isOverdue(ts) { return ts ? dueTimestampMs(ts) < Date.now() : false; }
+
+    function remainingTime(ts) {
+        if (!ts) return "";
+        var seconds = Math.floor((dueTimestampMs(ts) - clockTick) / 1000);
+        if (seconds <= 0) return "overdue";
+        var days = Math.floor(seconds / 86400);
+        var hours = Math.floor((seconds % 86400) / 3600);
+        var minutes = Math.floor((seconds % 3600) / 60);
+        if (days > 0) return days + "d " + hours + "h";
+        if (hours > 0) return hours + "h " + minutes + "m";
+        return Math.max(1, minutes) + "m";
+    }
+
+    function findNearestDueTask(src) {
+        var nearest = null;
+        for (var i = 0; i < (src || []).length; i++) {
+            var task = src[i];
+            if (task.completed || !task.due) continue;
+            if (!nearest || task.due < nearest.due) nearest = task;
+        }
+        return nearest;
+    }
 
     // ── List scoping ────────────────────────────────────────────────
     // `listFilter` decides which lists the widget watches — it is passed to
@@ -217,7 +253,7 @@ PluginComponent {
         if (!ts) return "none";
         var now = new Date();
         var startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-        var d = new Date(ts * 1000);
+        var d = new Date(dueTimestampMs(ts));
         var dueDay = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
         var dayDiff = Math.round((dueDay - startToday) / 86400000);
         if (dayDiff < 0) return "overdue";
@@ -333,7 +369,7 @@ PluginComponent {
         draftPriority = priorityWord(task.priority);
         if (task.due) {
             draftDueEnabled = true;
-            draftDueDate = new Date(task.due * 1000);
+            draftDueDate = new Date(dueTimestampMs(task.due));
             draftAllDay = (draftDueDate.getHours() === 0 && draftDueDate.getMinutes() === 0);
         } else {
             draftDueEnabled = false;
@@ -529,7 +565,7 @@ PluginComponent {
                 }
                 StyledText {
                     visible: root.openCount > 0
-                    text: root.openCount
+                    text: root.openCount + (root.nearestDueTask ? " · " + (root.nearestDueTask.summary || "(no summary)") + " · " + root.remainingTime(root.nearestDueTask.due) : "")
                     color: Theme.surfaceText
                     font.pixelSize: Theme.fontSizeMedium
                     font.weight: Font.Medium
@@ -559,7 +595,7 @@ PluginComponent {
                 }
                 StyledText {
                     visible: root.openCount > 0
-                    text: root.openCount
+                    text: root.openCount + (root.nearestDueTask ? " · " + (root.nearestDueTask.summary || "(no summary)") + " · " + root.remainingTime(root.nearestDueTask.due) : "")
                     color: Theme.surfaceText
                     font.pixelSize: Theme.fontSizeSmall
                     anchors.horizontalCenter: parent.horizontalCenter

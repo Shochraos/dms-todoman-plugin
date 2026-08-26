@@ -28,7 +28,7 @@ here; if `todo list` works in your terminal, this plugin will work.
 
 ## Features
 
-- **Bar pill** with a checklist icon and a live open-task count.
+- **Bar pill** with a checklist icon, live open-task count, nearest-due task title, and its remaining time.
 - **Due-date grouping** in the popout — tasks are split into fixed sections,
   and empty sections are hidden:
 
