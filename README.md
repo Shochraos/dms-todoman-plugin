@@ -1,4 +1,4 @@
-# Todoman Tasks — a DankBar plugin
+# dms-todoman-plugin
 
 A [DankMaterialShell](https://github.com/AvengeMedia/DankMaterialShell) (DMS)
 DankBar widget for your CalDAV to-dos, backed by
@@ -6,6 +6,10 @@ DankBar widget for your CalDAV to-dos, backed by
 the bar and opens a popout where you can browse tasks grouped by due date,
 complete them, and add or edit tasks inline — all driven by the `todo` CLI, so
 your `.ics` files stay the single source of truth.
+
+> **AI disclaimer:** The QML frontend was built with the help of AI, following
+> DankMaterialShell's Material Design scheme so it matches the rest of the
+> shell.
 
 > [!IMPORTANT]
 > **todoman is required.** This plugin is a front-end for the `todo` command; it
@@ -55,6 +59,22 @@ here; if `todo list` works in your terminal, this plugin will work.
 - Configurable watched lists, sort field, refresh interval, and a show-completed
   toggle (see [Settings](#settings)).
 
+## How it works
+
+- The widget runs `todo --porcelain list` and renders the JSON. Task **ids are
+  todoman's own** — the same ones `todo list` / `todo done` print — so completing
+  or editing a task uses ids that stay valid. The list is refetched after every
+  create/complete/edit so ids never go stale.
+- List names come from `todo lists`, which only exists in **todoman ≥ 4.7**. On
+  older versions that call fails silently, so the names are recovered from the
+  tasks themselves; the only thing lost is a list that currently holds no tasks.
+  Filtering by list happens inside the widget, never by refetching with
+  `todo list <name>` — that would make the bar's count follow the filter and
+  would hard-fail on a list that vanished between two refreshes.
+- All mutations go through the `todo` CLI, except renaming a summary and clearing
+  a due date or priority, which the CLI can't do directly; those go through
+  `ics_edit.py`, a small pass over the task's `.ics` file.
+
 ## Settings
 
 | Key               | Meaning                                              | Default |
@@ -85,8 +105,8 @@ attribute name becomes the plugin directory under
 
 ```nix
 # flake.nix
-inputs.dms-taskman-plugin = {
-  url = "github:Shochraos/dms-taskman-plugin";
+inputs.dms-todoman-plugin = {
+  url = "github:Shochraos/dms-todoman-plugin";
   flake = false;
 };
 ```
@@ -95,7 +115,7 @@ inputs.dms-taskman-plugin = {
 # home-manager module (where you configure DMS)
 programs.dank-material-shell.plugins.dankTodoman = {
   enable = true;
-  src = inputs.dms-taskman-plugin;
+  src = inputs.dms-todoman-plugin;
   # settings = { sortField = "priority"; showCompleted = false; };
 };
 ```
@@ -112,22 +132,6 @@ xdg.configFile."DankMaterialShell/plugins/dankTodoman".source = ./.;
 Either way, restart DMS (or its systemd user service) after installing so it
 picks the plugin up.
 
-## How it works
-
-- The widget runs `todo --porcelain list` and renders the JSON. Task **ids are
-  todoman's own** — the same ones `todo list` / `todo done` print — so completing
-  or editing a task uses ids that stay valid. The list is refetched after every
-  create/complete/edit so ids never go stale.
-- List names come from `todo lists`, which only exists in **todoman ≥ 4.7**. On
-  older versions that call fails silently, so the names are recovered from the
-  tasks themselves; the only thing lost is a list that currently holds no tasks.
-  Filtering by list happens inside the widget, never by refetching with
-  `todo list <name>` — that would make the bar's count follow the filter and
-  would hard-fail on a list that vanished between two refreshes.
-- All mutations go through the `todo` CLI, except renaming a summary and clearing
-  a due date or priority, which the CLI can't do directly; those go through
-  `ics_edit.py`, a small pass over the task's `.ics` file.
-
 ## Files
 
 | File | Purpose |
@@ -137,11 +141,6 @@ picks the plugin up.
 | `TodomanSettings.qml` | Settings page shown in DMS |
 | `ics_edit.py` | Rename summary / clear due / clear priority in an `.ics` |
 
-## AI usage
-
-The frontend (the QML UI) was built with the help of AI, following
-DankMaterialShell's Material Design scheme so it matches the rest of the shell.
-
 ## License
 
-MIT.
+[MIT](LICENSE) © 2026 Shochraos
