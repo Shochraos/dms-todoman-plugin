@@ -17,10 +17,13 @@ PluginComponent {
     readonly property bool showCompleted: pluginData.showCompleted === true
     readonly property string sortField: pluginData.sortField || "due"
     readonly property string defaultList: pluginData.defaultList || ""
+    readonly property bool showNearestTask: pluginData.showNearestTask === true
 
     // ── Runtime state ───────────────────────────────────────────────
     property var tasks: []
     property int openCount: 0
+    property real clockTick: Date.now()
+    readonly property var nearestDueTask: findNearestDueTask(tasks)
     property var lists: []                 // ["work", "personal"]
     property string viewList: ""           // "" = every watched list (session-only)
     property bool isLoading: true
@@ -85,6 +88,15 @@ PluginComponent {
         onTriggered: root.fetchTasks()
     }
 
+    // Drives the countdown in the pill, and the roll-over to the next task once one
+    // falls due. Idle unless the pill actually shows it.
+    Timer {
+        interval: 60000
+        running: root.showNearestTask
+        repeat: true
+        onTriggered: root.clockTick = Date.now()
+    }
+
     // ── Date/time helpers ───────────────────────────────────────────
     function pad2(n) { return ("0" + n).slice(-2); }
     readonly property var _months: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -139,6 +151,59 @@ PluginComponent {
     }
 
     function isOverdue(ts) { return ts ? (ts * 1000) < Date.now() : false; }
+
+    // Countdown for the horizontal pill: "3d 4h", "2h 5m", "12m". The smallest
+    // displayed unit is rounded up, so a task 90 seconds out reads "2m" and never
+    // claims less time than is left.
+    function remainingTime(ts) {
+        if (!ts) return "";
+        var minutes = Math.ceil((ts * 1000 - clockTick) / 60000);
+        if (minutes <= 0) return "overdue";
+        if (minutes < 60) return minutes + "m";
+        if (minutes < 1440) return Math.floor(minutes / 60) + "h " + (minutes % 60) + "m";
+        var hours = Math.ceil(minutes / 60);
+        return Math.floor(hours / 24) + "d " + (hours % 24) + "h";
+    }
+
+    // Same countdown for the vertical pill, which is only as wide as the bar is thick:
+    // the leading unit of `remainingTime` alone, and "!" once the task is overdue.
+    function remainingTimeShort(ts) {
+        if (!ts) return "";
+        var minutes = Math.ceil((ts * 1000 - clockTick) / 60000);
+        if (minutes <= 0) return "!";
+        if (minutes < 60) return minutes + "m";
+        if (minutes < 1440) return Math.floor(minutes / 60) + "h";
+        return Math.floor(Math.ceil(minutes / 60) / 24) + "d";
+    }
+
+    // The pill advertises what to do next: the soonest task still ahead. With nothing
+    // ahead, the *freshest* miss is the actionable one — picking the earliest due date
+    // outright would pin the pill to the oldest overdue task forever.
+    function findNearestDueTask(src) {
+        var nowSec = clockTick / 1000;
+        var upcoming = null;
+        var lastOverdue = null;
+        for (var i = 0; i < (src || []).length; i++) {
+            var task = src[i];
+            if (task.completed || !task.due) continue;
+            if (task.due >= nowSec) {
+                if (!upcoming || task.due < upcoming.due) upcoming = task;
+            } else if (!lastOverdue || task.due > lastOverdue.due) {
+                lastOverdue = task;
+            }
+        }
+        return upcoming || lastOverdue;
+    }
+
+    // Bar pills are sized from their content, so bound the summary by characters: a
+    // pixel cap drifts with Theme.fontScale and cannot stop the pill from growing.
+    readonly property int pillSummaryMaxChars: 22
+    function pillSummary(task) {
+        var s = (task && task.summary) || "(no summary)";
+        return s.length > pillSummaryMaxChars
+            ? s.substring(0, pillSummaryMaxChars - 1) + "\u2026"
+            : s;
+    }
 
     // ── List scoping ────────────────────────────────────────────────
     // `listFilter` decides which lists the widget watches — it is passed to
@@ -535,6 +600,27 @@ PluginComponent {
                     font.weight: Font.Medium
                     anchors.verticalCenter: parent.verticalCenter
                 }
+                StyledText {
+                    readonly property bool shown: root.showNearestTask && !!root.nearestDueTask
+                    visible: shown && root.openCount > 0
+                    text: shown ? "· " + root.pillSummary(root.nearestDueTask) : ""
+                    wrapMode: Text.NoWrap
+                    elide: Text.ElideRight
+                    maximumLineCount: 1
+                    color: Theme.surfaceText
+                    font.pixelSize: Theme.fontSizeMedium
+                    font.weight: Font.Medium
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+                StyledText {
+                    readonly property bool shown: root.showNearestTask && !!root.nearestDueTask
+                    visible: shown && root.openCount > 0
+                    text: shown ? "· " + root.remainingTime(root.nearestDueTask.due) : ""
+                    color: shown && root.isOverdue(root.nearestDueTask.due) ? Theme.error : Theme.surfaceText
+                    font.pixelSize: Theme.fontSizeMedium
+                    font.weight: Font.Medium
+                    anchors.verticalCenter: parent.verticalCenter
+                }
             }
         }
     }
@@ -561,6 +647,16 @@ PluginComponent {
                     visible: root.openCount > 0
                     text: root.openCount
                     color: Theme.surfaceText
+                    font.pixelSize: Theme.fontSizeSmall
+                    anchors.horizontalCenter: parent.horizontalCenter
+                }
+                // No room for a summary here — the pill is as wide as the bar is
+                // thick, so the vertical layout carries the countdown only.
+                StyledText {
+                    readonly property bool shown: root.showNearestTask && !!root.nearestDueTask
+                    visible: shown && root.openCount > 0
+                    text: shown ? root.remainingTimeShort(root.nearestDueTask.due) : ""
+                    color: shown && root.isOverdue(root.nearestDueTask.due) ? Theme.error : Theme.surfaceTextMedium
                     font.pixelSize: Theme.fontSizeSmall
                     anchors.horizontalCenter: parent.horizontalCenter
                 }
