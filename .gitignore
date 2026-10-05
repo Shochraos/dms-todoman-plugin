@@ -1,3 +1,4 @@
 .omp/
 .direnv/
 result*
+/AGENTS.md
