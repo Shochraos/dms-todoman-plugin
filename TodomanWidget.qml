@@ -1,8 +1,6 @@
 import QtQuick
-import QtQuick.Controls
 import qs.Common
 import qs.DCommon.Widgets
-
 import qs.Modules.Plugins
 
 PluginComponent {
@@ -45,26 +43,107 @@ PluginComponent {
     popoutContent: Component {
         PopoutComponent {
             id: popout
-            property bool filtersOpen: false
-            Item {
-                width: parent.width
-                height: Math.max(56, titleColumn.implicitHeight + 12)
-                Column {
-                    id: titleColumn
-                    anchors.left: parent.left; anchors.right: actions.left; anchors.verticalCenter: parent.verticalCenter
-                    StyledText { width: parent.width; text: taskController.editing ? (taskController.identity ? "Edit task" : "New task") : "Tasks"; font.pixelSize: Theme.fontSizeMedium + 3; font.weight: Font.DemiBold; color: Theme.surfaceText; elide: Text.ElideRight }
-                    StyledText { width: parent.width; visible: !taskController.editing; text: taskController.countText + (taskController.openCount === 1 && !taskController.unsupported.length ? " open task" : " open tasks"); font.pixelSize: Theme.fontSizeSmall; color: Theme.surfaceVariantText; elide: Text.ElideRight }
-                }
+
+            readonly property real bodyHeight: Math.max(180, root.popoutHeight - headerHeight - detailsHeight - PopoutMetrics.contentPadding * 2)
+
+            headerText: taskController.editing ? (taskController.identity ? "Edit task" : "New task") : "Tasks"
+            detailsText: taskController.editing ? "" : taskController.countText + (taskController.openCount === 1 && !taskController.unsupported.length ? " open task" : " open tasks")
+            headerActions: taskController.editing ? null : agendaActions
+
+            Component {
+                id: agendaActions
+
                 Row {
-                    id: actions; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-                    DActionButton { visible: !taskController.editing; buttonSize: 40; iconName: "add"; tooltipText: "Add task"; focusPolicy: Qt.StrongFocus; enabled: !taskController.busy; onClicked: taskController.openNew() }
-                    DActionButton { visible: !taskController.editing; buttonSize: 40; iconName: "search"; iconColor: popout.filtersOpen || taskController.search || taskController.viewList || taskController.category || taskController.priorityFilter !== "" || taskController.viewStatus !== "open" ? Theme.primary : Theme.surfaceVariantText; tooltipText: "Search and filters"; focusPolicy: Qt.StrongFocus; onClicked: popout.filtersOpen = !popout.filtersOpen }
-                    DActionButton { visible: !taskController.editing; buttonSize: 40; iconName: "refresh"; tooltipText: "Refresh tasks"; focusPolicy: Qt.StrongFocus; onClicked: taskController.refresh() }
+                    spacing: Theme.spacingXS
+
+                    DActionButton {
+                        buttonSize: 40
+                        iconName: "add"
+                        tooltipText: "Add task"
+                        enabled: !taskController.busy && !taskController.unknownOutcome
+                        onClicked: taskController.openNew()
+                    }
+
+                    DActionButton {
+                        id: searchAction
+                        buttonSize: 40
+                        iconName: "search"
+                        iconColor: agenda.searchVisible ? Theme.primary : Theme.surfaceVariantText
+                        tooltipText: agenda.searchVisible ? "Close search" : "Search tasks"
+                        onClicked: agenda.searchVisible ? agenda.closeSearch() : agenda.openSearch()
+
+                        Connections {
+                            target: agenda
+                            function onSearchClosed() { searchAction.forceActiveFocus() }
+                        }
+                    }
+
+                    DActionButton {
+                        id: filterAction
+                        buttonSize: 40
+                        iconName: "filter_list"
+                        iconColor: agenda.filtersOpen || agenda.hasFilters ? Theme.primary : Theme.surfaceVariantText
+                        tooltipText: agenda.filtersOpen ? "Hide filters" : "Show filters"
+                        Accessible.description: agenda.hasFilters ? "Filters applied" : ""
+                        onClicked: agenda.filtersOpen = !agenda.filtersOpen
+
+                        Connections {
+                            target: agenda
+                            function onFilterFocusRequested() { filterAction.forceActiveFocus() }
+                        }
+                    }
+
+                    DActionButton {
+                        buttonSize: 40
+                        iconName: "refresh"
+                        tooltipText: "Refresh tasks"
+                        enabled: !taskController.busy
+                        onClicked: taskController.refresh(true)
+                    }
                 }
             }
-            Connections { target: popout.parentPopout; ignoreUnknownSignals: true; function onShouldBeVisibleChanged() { if (popout.parentPopout && popout.parentPopout.shouldBeVisible) taskController.refresh() } }
-            TodomanAgenda { width: parent.width; height: Math.max(180, root.popoutHeight - 100); controller: taskController; filtersOpen: popout.filtersOpen; visible: !taskController.editing }
-            TodomanTaskEditor { width: parent.width; height: Math.max(180, root.popoutHeight - 100); controller: taskController; visible: taskController.editing }
+
+            Keys.onPressed: event => {
+                if (taskController.editing)
+                    return;
+                if (event.key === Qt.Key_F && event.modifiers === Qt.ControlModifier) {
+                    agenda.openSearch();
+                    event.accepted = true;
+                } else if (event.key === Qt.Key_Escape && agenda.filtersOpen) {
+                    agenda.filtersOpen = false;
+                    agenda.filterFocusRequested();
+                    event.accepted = true;
+                }
+            }
+
+            Connections {
+                target: popout.parentPopout
+                ignoreUnknownSignals: true
+
+                function onShouldBeVisibleChanged() {
+                    if (popout.parentPopout.shouldBeVisible) {
+                        taskController.refresh();
+                    } else {
+                        agenda.filtersOpen = false;
+                        agenda.searchOpen = false;
+                    }
+                }
+            }
+
+            TodomanAgenda {
+                id: agenda
+                width: popout.width
+                height: popout.bodyHeight
+                controller: taskController
+                visible: !taskController.editing
+            }
+
+            TodomanTaskEditor {
+                width: popout.width
+                height: popout.bodyHeight
+                controller: taskController
+                visible: taskController.editing
+            }
         }
     }
 }

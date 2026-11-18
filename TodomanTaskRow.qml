@@ -1,36 +1,119 @@
 import QtQuick
 import qs.Common
+import qs.DCommon.Common
 import qs.DCommon.Widgets
 
 Item {
     id: row
+
     required property var task
     required property var controller
-    implicitHeight: Math.max(52, textColumn.implicitHeight + 16)
-    Rectangle {
-        anchors.fill: parent; radius: 5
-        color: row.activeFocus ? Theme.withAlpha(Theme.primary, 0.15) : rowHover.hovered ? Theme.surfaceContainerHigh : "transparent"
-        border.width: row.activeFocus ? 2 : 0; border.color: Theme.primary
+    property real textInset: Theme.spacingS
+
+    readonly property string summary: task.summary || "(no summary)"
+    readonly property bool open: controller.isOpen(task)
+    readonly property bool cancelled: task.status === "CANCELLED"
+    readonly property string statusLabel: cancelled ? "Cancelled" : !open ? "Completed" : task.status === "IN-PROCESS" ? "In progress" : ""
+    readonly property string dueLabel: task.due ? Qt.formatDateTime(new Date(controller.dueTime(task.due)), task.due.kind === "date" ? "MMM d" : "MMM d, HH:mm") : ""
+    readonly property string metadata: [statusLabel, dueLabel, task.list, task.recurring ? "Repeats" : "", task.priority ? "P" + task.priority : "", open && task.percent ? task.percent + "%" : ""].filter(value => !!value).join(" · ")
+
+    implicitHeight: Math.max(52, textColumn.implicitHeight + Theme.spacingS * 2)
+    height: implicitHeight
+
+    DListItem {
+        id: edit
+
+        anchors.left: parent.left
+        anchors.right: rowAction.left
+        anchors.rightMargin: Theme.spacingXS
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        surfaceColor: "transparent"
+        border.width: 0
+        topLeftRadius: Style.cornerRadiusM
+        topRightRadius: Style.cornerRadiusM
+        bottomLeftRadius: Style.cornerRadiusM
+        bottomRightRadius: Style.cornerRadiusM
+        enabled: !row.controller.busy && !row.controller.unknownOutcome
+        Accessible.role: Accessible.Button
+        Accessible.name: "Edit " + row.summary
+        Accessible.description: row.metadata
+        tooltipText: title.truncated || detail.truncated ? row.summary + (row.metadata ? "\n" + row.metadata : "") : null
+        onClicked: row.controller.openTask(row.task)
+
+        Rectangle {
+            x: Math.max(0, row.textInset - Theme.spacingS)
+            anchors.verticalCenter: parent.verticalCenter
+            width: 3
+            height: Math.min(32, textColumn.implicitHeight)
+            radius: width / 2
+            color: row.task.list_colour || Theme.primary
+        }
+
+        Column {
+            id: textColumn
+
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.leftMargin: row.textInset
+            anchors.rightMargin: Theme.spacingS
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: Theme.spacingXXS
+
+            StyledText {
+                id: title
+
+                width: parent.width
+                text: row.summary
+                textFormat: Text.PlainText
+                color: edit.visualFocus ? edit.contentColor : Theme.surfaceText
+                font.pixelSize: Theme.fontSizeMedium
+                font.weight: Font.DemiBold
+                elide: Text.ElideRight
+                maximumLineCount: 2
+                wrapMode: Text.Wrap
+                Accessible.ignored: true
+            }
+
+            StyledText {
+                id: detail
+
+                width: parent.width
+                visible: row.metadata !== ""
+                text: row.metadata
+                textFormat: Text.PlainText
+                color: edit.visualFocus ? edit.supportingContentColor : Theme.surfaceVariantText
+                font.pixelSize: Theme.fontSizeSmall
+                elide: Text.ElideRight
+                Accessible.ignored: true
+            }
+        }
     }
-    HoverHandler { id: rowHover }
-    Rectangle { x: 8; anchors.verticalCenter: parent.verticalCenter; width: 4; height: Math.min(34, parent.height - 12); radius: 2; color: row.task.list_colour || Theme.primary }
-    Column {
-        id: textColumn
-        x: 20; width: Math.max(0, parent.width - 68); anchors.verticalCenter: parent.verticalCenter
-        StyledText { width: parent.width; text: row.task.summary || "(no summary)"; color: Theme.surfaceText; font.pixelSize: Theme.fontSizeSmall; elide: Text.ElideRight; maximumLineCount: 2; wrapMode: Text.Wrap }
-        StyledText { width: parent.width; text: [row.task.due ? Qt.formatDateTime(new Date(row.controller.dueTime(row.task.due)), row.task.due.kind === "date" ? "MMM d" : "MMM d, HH:mm") : "", row.task.list || "", row.task.recurring ? "Repeats" : "", row.task.priority ? "P" + row.task.priority : "", row.task.percent ? row.task.percent + "%" : ""].filter(function(s) { return s }).join(" · "); color: Theme.surfaceVariantText; font.pixelSize: Theme.fontSizeSmall; elide: Text.ElideRight }
+
+    Item {
+        id: rowAction
+
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        width: 40
+        height: 40
+
+        DActionButton {
+            visible: row.open
+            buttonSize: 40
+            iconName: "radio_button_unchecked"
+            enabled: !row.controller.busy && !row.controller.unknownOutcome
+            tooltipText: "Complete " + row.summary
+            onClicked: row.controller.action("complete", row.task)
+        }
+
+        DIcon {
+            visible: !row.open
+            anchors.centerIn: parent
+            name: row.cancelled ? "cancel" : "check_circle"
+            size: Style.iconSizeMedium
+            color: Theme.surfaceVariantText
+            Accessible.ignored: true
+        }
     }
-    MouseArea { anchors.left: parent.left; anchors.right: complete.left; anchors.top: parent.top; anchors.bottom: parent.bottom; onClicked: row.controller.openTask(row.task) }
-    DActionButton {
-        id: complete; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-        buttonSize: 40; iconSize: 20; iconName: row.controller.isOpen(row.task) ? "radio_button_unchecked" : "check_circle"
-        enabled: !row.controller.busy && row.controller.isOpen(row.task)
-        tooltipText: "Complete " + row.task.summary; focusPolicy: Qt.StrongFocus
-        onClicked: row.controller.action("complete", row.task)
-    }
-    activeFocusOnTab: true
-    Accessible.role: Accessible.Button
-    Accessible.name: "Edit " + task.summary
-    Keys.onReturnPressed: controller.openTask(task)
-    Keys.onSpacePressed: controller.openTask(task)
 }

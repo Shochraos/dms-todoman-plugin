@@ -17,7 +17,7 @@ PluginSettings {
     StringSetting {
         settingKey: "listFilter"
         label: "Lists"
-        description: "Comma-separated list names to watch (empty = all). The dropdown in the popout header narrows the view within these."
+        description: "Separate list names with commas, or leave blank to watch all lists. Agenda filters only change what you see in the popout."
         placeholder: "work, personal"
         defaultValue: ""
     }

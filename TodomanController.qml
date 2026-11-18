@@ -25,6 +25,7 @@ Item {
     readonly property string errorSource: operationError ? "operation" : snapshotError ? "snapshot" : ""
     property var activeRequest: null
     property bool refreshPending: false
+    property bool recoverySnapshot: false
     property var draft: null
     property var draftBaseline: null
     property var identity: null
@@ -99,9 +100,10 @@ Item {
         if (m < 1440) return Math.floor(m / 60) + "h" + (shortForm ? "" : " " + (m % 60) + "m")
         return Math.floor(Math.ceil(m / 60) / 24) + "d" + (shortForm ? "" : " " + (Math.ceil(m / 60) % 24) + "h")
     }
-    function refresh() {
-        if (!editing) unknownOutcome = false
+    function refresh(explicitRetry) {
         if (busy) { refreshPending = true; return }
+        recoverySnapshot = explicitRetry === true && unknownOutcome && !editing
+        if (recoverySnapshot) clearError()
         send({action:"snapshot", lists:watched(), sort:sortField})
     }
     function send(request) {
@@ -113,12 +115,12 @@ Item {
         process.running = true
     }
     function openNew() {
-        if (busy || editing) return
-        identity = null; unknownOutcome = false; clearError(); editorSession++
+        if (busy || editing || unknownOutcome) return
+        identity = null; clearError(); editorSession++
         draft = {summary:"", list:viewList || defaultList || "", description:"", location:"", categories:[], priority:0, status:"NEEDS-ACTION", percent:0, start:null, due:null, rrule:""}
         draftBaseline = clone(draft)
     }
-    function openTask(task) { if (!busy && !editing) send({action:"detail", id:task.id, uid:task.uid}) }
+    function openTask(task) { if (!busy && !editing && !unknownOutcome) send({action:"detail", id:task.id, uid:task.uid}) }
     function setField(name, value) {
         var copy = clone(draft); copy[name] = value
         if (name === "status" && value === "COMPLETED") copy.percent = 100
@@ -128,7 +130,7 @@ Item {
         draft = copy
     }
     function leave() { if (busy) return; if (dirty || unknownOutcome) confirmDiscard = true; else discard() }
-    function discard() { draft = null; draftBaseline = null; identity = null; dateInputs = ({}); unknownOutcome = false; confirmDiscard = false; confirmDelete = false; clearError() }
+    function discard() { draft = null; draftBaseline = null; identity = null; dateInputs = ({}); confirmDiscard = false; confirmDelete = false; clearError() }
     function save() {
         if (busy || unknownOutcome || !draft) return
         if (invalidDates) { setError("Enter a valid date and time before saving.", "operation"); return }
@@ -169,10 +171,15 @@ Item {
             } else if (result.mutated || result.code === "partial") unknownOutcome = true
             if (result.mutated) refreshPending = true
         } else if (request.action === "snapshot") {
-            if (Array.isArray(result.tasks) && result.tasks.every(validTask) && Array.isArray(result.lists) && result.lists.every(function(s) { return typeof s === "string" }) && (result.unsupported === undefined || (Array.isArray(result.unsupported) && result.unsupported.every(function(entry) { return entry && typeof entry.message === "string" })))) { tasks = result.tasks; lists = result.lists; unsupported = result.unsupported || []; if (viewList && viewLists.indexOf(viewList) < 0) viewList = ""; snapshotError = "" }
+            if (Array.isArray(result.tasks) && result.tasks.every(validTask) && Array.isArray(result.lists) && result.lists.every(function(s) { return typeof s === "string" }) && (result.unsupported === undefined || (Array.isArray(result.unsupported) && result.unsupported.every(function(entry) { return entry && typeof entry.message === "string" })))) {
+                tasks = result.tasks; lists = result.lists; unsupported = result.unsupported || []
+                if (viewList && viewLists.indexOf(viewList) < 0) viewList = ""
+                snapshotError = ""
+                if (recoverySnapshot && !unsupported.length) unknownOutcome = false
+            }
             else setError("The task helper returned an incomplete snapshot.", "snapshot")
         } else if (request.action === "detail") {
-            if (validTask(result.task) && result.task.id === request.id && result.task.uid === request.uid) { editorSession++; adopt(result.task); draft = fields(result.task); draftBaseline = clone(draft); unknownOutcome = false }
+            if (validTask(result.task) && result.task.id === request.id && result.task.uid === request.uid) { editorSession++; adopt(result.task); draft = fields(result.task); draftBaseline = clone(draft) }
             else setError("The task helper returned no task details.", "operation")
         } else {
             if ((request.action === "delete" && result.task === null) || (request.action !== "delete" && validTask(result.task) && (request.action === "create" || request.action === "copy" || result.task.uid === request.uid))) {

@@ -20,7 +20,7 @@ editor. Your existing local `.ics` files remain the source of truth.
 | Requirement | Why | Notes |
 |-------------|-----|-------|
 | **Todoman ≥ 4.7** (`todo` on the shell's `PATH`) | Task discovery and native lifecycle operations | Needs a working Todoman configuration and local task directories; respects `TODOMAN_CONFIG` |
-| **DuxShell 2.x** | Host shell and plugin API | Uses the existing `requires_dms` manifest key |
+| **DuxShell ≥ 2.1.1** | Native popout, menus and calendar controls | Declared by `requires_dms` in `plugin.json` |
 | **Python ≥ 3.10 with the packages in `requirements.txt`** | Structured iCalendar reads and field edits | Select the interpreter with `pythonExecutable`; defaults to `python3` |
 
 todoman itself reads CalDAV `VTODO`s from local `.ics` directories — typically
@@ -106,8 +106,8 @@ before retrying an operation that may already have changed a task.
 Grouping by due date is always on; `sortField` controls the order of tasks
 *within* each group.
 
-`listFilter` sets the watched lists; the header dropdown narrows the view within
-them. The helper enumerates Todoman rows across all lists and statuses, then
+`listFilter` sets the watched lists. Use **Show filters** in the agenda header
+to narrow the view without changing those lists. The helper enumerates Todoman rows across all lists and statuses, then
 filters watched lists before reading their individual files. A temporary
 configuration overlay disables Todoman's `startable` view default for that
 enumeration so future-start tasks remain available; it does not change your

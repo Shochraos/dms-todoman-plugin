@@ -1,75 +1,376 @@
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Window
 import qs.Common
+import qs.DCommon.Common
 import qs.DCommon.Widgets
 
 Item {
     id: agenda
+
     required property var controller
+    property bool searchOpen: false
     property bool filtersOpen: false
-    onFiltersOpenChanged: if (filtersOpen) { scroller.stopMomentum(); scroller.contentY = 0 }
-    implicitHeight: 440
-    property var categories: {
-        var result = []
-        controller.tasks.forEach(function(t) { (t.categories || []).forEach(function(c) { if (result.indexOf(c) < 0) result.push(c) }) })
-        return result.sort()
+    readonly property bool searchVisible: searchOpen || controller.search !== ""
+    readonly property real textInset: Theme.spacingS
+    readonly property string defaultStatus: controller.showCompleted ? "all" : "open"
+    readonly property var filterFields: [
+        {field: "viewList", label: "List", emptyLabel: "All lists"},
+        {field: "viewStatus", label: "Status", emptyLabel: ""},
+        {field: "category", label: "Category", emptyLabel: "All categories"},
+        {field: "priorityFilter", label: "Priority", emptyLabel: "Any priority"}
+    ]
+    readonly property var statusValues: ["open", "all", "NEEDS-ACTION", "IN-PROCESS", "COMPLETED", "CANCELLED"]
+    readonly property var statusLabels: ["Open", "All statuses", "Needs action", "In progress", "Completed", "Cancelled"]
+    readonly property var priorityValues: ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+    readonly property var categories: {
+        const values = new Set();
+        for (const task of controller.tasks)
+            for (const category of task.categories || [])
+                values.add(category);
+        if (controller.category)
+            values.add(controller.category);
+        return Array.from(values).sort();
     }
+    readonly property bool hasFilters: filterFields.some(field => controller[field.field] !== defaultFilterValue(field.field))
+    readonly property Item focusedItem: agenda.Window.window?.activeFocusItem ?? null
     readonly property var sections: {
-        var result = [], lastWeek = ""
-        controller.groups.forEach(function(group) {
-            if (group.key !== "upcoming" || controller.sortField !== "due") { result.push(group); return }
-            var lastDay = "", current = null
-            group.tasks.forEach(function(task) {
-                var date = new Date(controller.dueTime(task.due)), day = date.toDateString()
+        const result = [];
+        const tomorrow = new Date(controller.clock);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const tomorrowKey = tomorrow.toDateString();
+        for (const group of controller.groups) {
+            if (group.key !== "upcoming" || controller.sortField !== "due") {
+                result.push(group);
+                continue;
+            }
+            let lastDay = "";
+            let section = null;
+            for (const task of group.tasks) {
+                const date = new Date(controller.dueTime(task.due));
+                const day = date.toDateString();
                 if (day !== lastDay) {
-                    var monday = new Date(date.getFullYear(), date.getMonth(), date.getDate() - ((date.getDay() + 6) % 7))
-                    var week = monday.toDateString()
-                    var tomorrow = new Date(controller.clock); tomorrow.setDate(tomorrow.getDate() + 1)
-                    current = {label: (day === tomorrow.toDateString() ? "Tomorrow · " : "") + Qt.formatDate(date, "dddd d MMMM"), week: week !== lastWeek ? "Week of " + Qt.formatDate(monday, "d MMMM") : "", tasks: []}
-                    result.push(current); lastDay = day; lastWeek = week
+                    section = {
+                        key: "upcoming",
+                        label: (day === tomorrowKey ? "Tomorrow · " : "") + Qt.formatDate(date, "dddd d MMMM"),
+                        tasks: []
+                    };
+                    result.push(section);
+                    lastDay = day;
                 }
-                current.tasks.push(task)
-            })
-        })
-        return result
+                section.tasks.push(task);
+            }
+        }
+        return result;
     }
+
+    signal searchClosed()
+    signal filterFocusRequested()
+
+    function defaultFilterValue(field) {
+        return field === "viewStatus" ? defaultStatus : "";
+    }
+
+    function optionsFor(field) {
+        switch (field) {
+        case "viewList": return [""].concat(controller.viewLists);
+        case "viewStatus": return statusValues;
+        case "category": return [""].concat(categories);
+        case "priorityFilter": return [""].concat(priorityValues);
+        }
+        return [];
+    }
+
+    function scrollToTop() {
+        scroller.stopMomentum();
+        scroller.contentY = 0;
+    }
+
+    function openSearch() {
+        searchOpen = true;
+        scrollToTop();
+        searchField.forceActiveFocus();
+    }
+
+    function closeSearch() {
+        controller.search = "";
+        searchOpen = false;
+        scrollToTop();
+        searchClosed();
+    }
+
+    function revealFocusedItem() {
+        const item = focusedItem;
+        for (let ancestor = item; ancestor; ancestor = ancestor.parent) {
+            if (ancestor === scroller.contentItem) {
+                const top = item.mapToItem(scroller.contentItem, 0, 0).y;
+                scroller.stopMomentum();
+                scroller.revealRange(top - Theme.spacingXS, top + item.height + Theme.spacingXS);
+                break;
+            }
+        }
+    }
+
+    onFiltersOpenChanged: if (filtersOpen) scrollToTop()
+    onFocusedItemChanged: if (visible && focusedItem) revealFocusedItem()
+
+    Connections {
+        target: agenda.controller
+
+        function onErrorChanged() {
+            if (agenda.visible && agenda.controller.error)
+                agenda.scrollToTop();
+        }
+    }
+
+    Item {
+        id: searchStrip
+
+        width: parent.width
+        height: agenda.searchVisible ? searchField.implicitHeight + Theme.spacingS : 0
+        visible: agenda.searchVisible
+
+        DSearchField {
+            id: searchField
+
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.margins: agenda.textInset
+            placeholderText: "Search tasks"
+            Accessible.name: "Search tasks"
+            text: agenda.controller.search
+            onTextEdited: {
+                if (inputFocused && text !== agenda.controller.search) {
+                    agenda.controller.search = text;
+                    agenda.scrollToTop();
+                }
+            }
+            onCleared: {
+                agenda.searchOpen = true;
+                agenda.controller.search = "";
+                agenda.scrollToTop();
+                forceActiveFocus();
+            }
+            Keys.onEscapePressed: agenda.closeSearch()
+        }
+    }
+
     DFlickable {
         id: scroller
-        anchors.fill: parent
-        contentHeight: content.implicitHeight; clip: true; fadeEdges: false
+
+        anchors.top: searchStrip.bottom
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        contentWidth: width
+        contentHeight: content.implicitHeight
+        clip: true
+        fadeEdges: false
+        onHeightChanged: if (agenda.visible && agenda.focusedItem) Qt.callLater(agenda.revealFocusedItem)
+
         Column {
-            id: content; width: parent.width; spacing: 4
+            id: content
+
+            width: scroller.width
+            spacing: Theme.spacingS
+
             Column {
-                width: parent.width; spacing: 6; visible: agenda.filtersOpen
-                TodomanField { width: parent.width; placeholderText: "Search tasks"; text: agenda.controller.search; onTextEdited: if (inputFocused) agenda.controller.search = text; Accessible.name: "Search tasks" }
-                TodomanCombo { width: parent.width; model: ["All lists"].concat(agenda.controller.viewLists); currentIndex: agenda.controller.viewList ? agenda.controller.viewLists.indexOf(agenda.controller.viewList) + 1 : 0; onActivated: index => agenda.controller.viewList = index ? agenda.controller.viewLists[index - 1] : ""; Accessible.name: "Filter by list" }
-                TodomanCombo { width: parent.width; model: ["Open", "All", "Needs action", "In progress", "Completed", "Cancelled"]; currentIndex: ["open", "all", "NEEDS-ACTION", "IN-PROCESS", "COMPLETED", "CANCELLED"].indexOf(agenda.controller.viewStatus); onActivated: index => agenda.controller.viewStatus = ["open", "all", "NEEDS-ACTION", "IN-PROCESS", "COMPLETED", "CANCELLED"][index]; Accessible.name: "Status filter" }
-                TodomanCombo { width: parent.width; model: ["All categories"].concat(agenda.categories); currentIndex: agenda.controller.category ? agenda.categories.indexOf(agenda.controller.category) + 1 : 0; onActivated: index => agenda.controller.category = index ? model[index] : ""; Accessible.name: "Category filter" }
-                TodomanCombo { width: parent.width; model: ["Any priority", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]; currentIndex: agenda.controller.priorityFilter === "" ? 0 : Number(agenda.controller.priorityFilter) + 1; onActivated: index => agenda.controller.priorityFilter = index ? model[index] : ""; Accessible.name: "Priority filter" }
+                x: agenda.textInset
+                width: Math.max(0, parent.width - agenda.textInset * 2)
+                spacing: Theme.spacingXS
+
+                StyledText {
+                    width: parent.width
+                    visible: text !== ""
+                    text: agenda.controller.error
+                    textFormat: Text.PlainText
+                    color: Theme.error
+                    wrapMode: Text.Wrap
+                    font.pixelSize: Theme.fontSizeSmall
+                }
+
+                StyledText {
+                    width: parent.width
+                    visible: agenda.controller.unknownOutcome
+                    text: "A task change could not be confirmed. Use Refresh to reload all watched tasks before making another change."
+                    color: Theme.error
+                    wrapMode: Text.Wrap
+                    font.pixelSize: Theme.fontSizeSmall
+                }
+
+                StyledText {
+                    width: parent.width
+                    visible: agenda.controller.unsupported.length > 0
+                    text: "Some task entries could not be read. The count and next-task suggestion may be incomplete."
+                    color: Theme.error
+                    wrapMode: Text.Wrap
+                    font.pixelSize: Theme.fontSizeSmall
+                }
+
+                Repeater {
+                    model: agenda.controller.unsupported
+
+                    delegate: StyledText {
+                        required property var modelData
+
+                        width: parent.width
+                        text: "Task " + modelData.id + (modelData.list ? " in " + modelData.list : "") + ": " + modelData.message
+                        textFormat: Text.PlainText
+                        color: Theme.surfaceVariantText
+                        wrapMode: Text.Wrap
+                        font.pixelSize: Theme.fontSizeSmall
+                    }
+                }
             }
-            StyledText { width: parent.width; visible: agenda.controller.error !== ""; text: agenda.controller.error; color: Theme.error; wrapMode: Text.Wrap; font.pixelSize: Theme.fontSizeSmall }
-            StyledText { visible: agenda.controller.unsupported.length > 0; width: parent.width; text: "Some task entries could not be read. The count and next-task suggestion may be incomplete."; wrapMode: Text.Wrap; color: Theme.error; font.pixelSize: Theme.fontSizeSmall }
-            Repeater {
-                model: agenda.controller.unsupported
-                delegate: StyledText { required property var modelData; width: content.width; text: "Task " + modelData.id + (modelData.list ? " in " + modelData.list : "") + ": " + modelData.message; wrapMode: Text.Wrap; color: Theme.surfaceVariantText; font.pixelSize: Theme.fontSizeSmall }
+
+            Flow {
+                id: filterPanel
+
+                readonly property real minimumFieldWidth: filterMetrics.advanceWidth("All categories") + Style.iconSize + Style.spacingXL * 2
+                readonly property int columns: width >= minimumFieldWidth * 2 + spacing ? 2 : 1
+                readonly property real fieldWidth: Math.max(0, (width - (columns - 1) * spacing) / columns)
+
+                x: agenda.textInset
+                width: Math.max(0, parent.width - agenda.textInset * 2)
+                spacing: Theme.spacingS
+                visible: agenda.filtersOpen
+
+                FontMetrics {
+                    id: filterMetrics
+                    font.family: Style.fontFor("ui")
+                    font.pixelSize: Style.fontSizeMedium
+                }
+
+                Repeater {
+                    model: agenda.filterFields
+
+                    delegate: Column {
+                        id: filter
+
+                        required property var modelData
+                        width: filterPanel.fieldWidth
+                        spacing: Theme.spacingXXS
+
+                        StyledText {
+                            text: filter.modelData.label
+                            color: Theme.surfaceVariantText
+                            font.pixelSize: Theme.fontSizeSmall
+                            Accessible.ignored: true
+                        }
+
+                        DDropdown {
+                            id: picker
+
+                            width: filter.width
+                            focusPolicy: Qt.StrongFocus
+                            emptyText: filter.modelData.emptyLabel
+                            Accessible.name: filter.modelData.label + " filter"
+                            Accessible.description: currentValue ? labelOf(currentValue) : emptyText
+                            optionValues: agenda.optionsFor(filter.modelData.field)
+                            options: filter.modelData.field === "viewStatus" ? agenda.statusLabels : [emptyText].concat(optionValues.slice(1))
+                            currentValue: agenda.controller[filter.modelData.field]
+                            onValueChanged: value => {
+                                agenda.controller[filter.modelData.field] = value;
+                                picker.currentValue = Qt.binding(() => agenda.controller[filter.modelData.field]);
+                            }
+                            onVisibleChanged: if (!visible) closeDropdownMenu()
+                        }
+                    }
+                }
             }
-            StyledText { visible: agenda.controller.visibleTasks.length === 0; width: parent.width; text: agenda.controller.loading ? "Loading tasks…" : "No matching tasks."; color: Theme.surfaceVariantText; font.pixelSize: Theme.fontSizeMedium }
+
+            Flow {
+                id: appliedFilters
+
+                x: agenda.textInset
+                width: Math.max(0, parent.width - agenda.textInset * 2)
+                spacing: Theme.spacingXS
+                visible: agenda.hasFilters
+
+                Repeater {
+                    model: agenda.filterFields
+
+                    delegate: DButton {
+                        required property var modelData
+                        readonly property string value: agenda.controller[modelData.field]
+                        readonly property string valueLabel: modelData.field === "viewStatus" ? agenda.statusLabels[agenda.statusValues.indexOf(value)] || value : value
+
+                        visible: value !== agenda.defaultFilterValue(modelData.field)
+                        text: modelData.label + ": " + valueLabel
+                        iconName: "close"
+                        variant: "tonal"
+                        buttonHeight: 40
+                        horizontalPadding: Theme.spacingS
+                        maximumWidth: appliedFilters.width
+                        wrapText: true
+                        tooltipText: "Remove " + modelData.label.toLowerCase() + " filter"
+                        Accessible.name: tooltipText + ": " + valueLabel
+                        onClicked: {
+                            agenda.controller[modelData.field] = agenda.defaultFilterValue(modelData.field);
+                            agenda.filterFocusRequested();
+                        }
+                    }
+                }
+            }
+
+            StyledText {
+                x: agenda.textInset
+                width: Math.max(0, parent.width - agenda.textInset * 2)
+                topPadding: Theme.spacingS
+                visible: agenda.controller.visibleTasks.length === 0 && !agenda.controller.error
+                text: agenda.controller.loading ? "Loading tasks…" : agenda.searchVisible && agenda.controller.search.trim() || agenda.hasFilters ? "No matching tasks." : agenda.defaultStatus === "open" ? "No open tasks." : "No tasks."
+                color: Theme.surfaceVariantText
+                font.pixelSize: Theme.fontSizeMedium
+                wrapMode: Text.Wrap
+            }
+
             Repeater {
                 model: agenda.sections
+
                 delegate: Column {
+                    id: section
+
                     required property var modelData
-                    width: content.width; spacing: 0
+                    readonly property bool isToday: modelData.key === "today"
+                    width: content.width
+
                     Item {
-                        width: parent.width; height: weekLabel.visible ? Math.max(30, weekLabel.implicitHeight + 12) : 0
-                        StyledText { id: weekLabel; anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; visible: !!modelData.week; text: modelData.week || ""; color: Theme.surfaceVariantText; font.pixelSize: Theme.fontSizeSmall }
-                        Rectangle { anchors.left: weekLabel.right; anchors.leftMargin: 8; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; visible: weekLabel.visible; height: 1; color: Theme.surfaceContainerHigh }
+                        width: section.width
+                        height: Math.max(28, sectionLabel.implicitHeight + Theme.spacingS)
+
+                        Rectangle {
+                            anchors.fill: parent
+                            visible: section.isToday
+                            color: Theme.withAlpha(Theme.primary, 0.16)
+                            radius: Theme.cornerRadius / 2
+                        }
+
+                        StyledText {
+                            id: sectionLabel
+
+                            x: agenda.textInset
+                            width: Math.max(0, parent.width - agenda.textInset * 2)
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: section.modelData.label
+                            color: section.isToday ? Theme.primary : Theme.surfaceVariantText
+                            font.pixelSize: Theme.fontSizeMedium
+                            font.weight: Font.DemiBold
+                            elide: Text.ElideRight
+                            Accessible.role: Accessible.Heading
+                        }
                     }
-                    Item {
-                        width: parent.width; height: Math.max(32, sectionLabel.implicitHeight + 12)
-                        Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; height: parent.height - 6; radius: 5; color: modelData.key === "today" ? Theme.withAlpha(Theme.primary, 0.16) : Theme.surfaceContainerHigh }
-                        StyledText { id: sectionLabel; anchors.left: parent.left; anchors.leftMargin: 8; anchors.verticalCenter: parent.verticalCenter; text: modelData.label; color: modelData.key === "today" ? Theme.primary : Theme.surfaceText; font.pixelSize: Theme.fontSizeSmall }
+
+                    Repeater {
+                        model: section.modelData.tasks
+
+                        delegate: TodomanTaskRow {
+                            required property var modelData
+
+                            width: section.width
+                            textInset: agenda.textInset
+                            task: modelData
+                            controller: agenda.controller
+                        }
                     }
-                    Repeater { model: modelData.tasks; delegate: TodomanTaskRow { required property var modelData; width: content.width; task: modelData; controller: agenda.controller } }
                 }
             }
         }
