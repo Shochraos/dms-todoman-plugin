@@ -7,6 +7,14 @@ PluginSettings {
     pluginId: "dankTodoman"
 
     StringSetting {
+        settingKey: "pythonExecutable"
+        label: "Python interpreter"
+        description: "Interpreter with icalendar and python-dateutil installed"
+        placeholder: "python3"
+        defaultValue: "python3"
+    }
+
+    StringSetting {
         settingKey: "listFilter"
         label: "Lists"
         description: "Comma-separated list names to watch (empty = all). The dropdown in the popout header narrows the view within these."
