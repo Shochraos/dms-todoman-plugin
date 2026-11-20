@@ -11,6 +11,7 @@ DDropdown {
     currentValue: currentText
     showLabel: true
     dropdownWidth: width
+    clampMenuWidth: true
     triggerHeight: 40
     focusPolicy: Qt.StrongFocus
     onCurrentTextChanged: currentValue = currentText

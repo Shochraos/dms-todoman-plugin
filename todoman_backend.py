@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import errno
 import hashlib
 import json
 import os
@@ -182,7 +183,7 @@ def task_from_row(row):
     return {"id": task_id, "uid": str(component.get("UID")), "revision": hashlib.sha256(data).hexdigest(), "list": row["list"], "list_colour": row.get("list_colour"), "summary": str(component.get("SUMMARY", "")), "description": str(component.get("DESCRIPTION", "")), "location": str(component.get("LOCATION", "")), "categories": category_values, "priority": int(component.get("PRIORITY", 0)), "status": status, "percent": int(component.get("PERCENT-COMPLETE", 0)), "completed": status != "CANCELLED" and (status == "COMPLETED" or component.get("COMPLETED") is not None), "recurring": bool(rule), "rrule": rule.to_ical().decode() if rule else "", "created_at": created_at, "start": typed_date(component, "DTSTART"), "due": typed_date(component, "DUE")}
 
 
-def rows(sort="due"):
+def config_path():
     config = os.environ.get("TODOMAN_CONFIG")
     if not config:
         home = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
@@ -190,10 +191,27 @@ def rows(sort="due"):
         config = next((str(Path(directory) / "todoman" / "config.py") for directory in directories if directory and (Path(directory) / "todoman" / "config.py").exists()), None)
     if not config:
         fail("command", "Todoman configuration could not be found.")
+    return config
+
+
+def list_rows(sort="due"):
+    config = config_path()
     with tempfile.TemporaryDirectory(prefix="todoman-view-") as directory:
         overlay = Path(directory) / "config.py"
-        overlay.write_text("import runpy\nglobals().update(runpy.run_path(" + repr(config) + "))\nstartable = False\n")
-        return cli_json("list", "--status", "ANY", "--sort", sort, config=str(overlay))
+        marker = Path(directory) / "startable"
+        overlay.write_text(
+            "import pathlib, runpy\n"
+            "globals().update(runpy.run_path(" + repr(config) + "))\n"
+            "pathlib.Path(" + repr(str(marker)) + ").write_text('1' if globals().get('startable', False) else '0')\n"
+            "startable = False\n"
+        )
+        items = cli_json("list", "--status", "ANY", "--sort", sort, config=str(overlay))
+        startable = marker.is_file() and marker.read_text().strip() == "1"
+        return items, startable
+
+
+def rows(sort="due"):
+    return list_rows(sort)[0]
 
 
 def find_id(task_id):
@@ -347,6 +365,15 @@ def validate(changes, current=None):
     return changes
 
 
+def read_xattrs(target):
+    try:
+        return {name: os.getxattr(target, name) for name in os.listxattr(target)}
+    except OSError as error:
+        if error.errno in (errno.ENOTSUP, errno.EOPNOTSUPP, errno.ENOSYS):
+            return None
+        raise
+
+
 def update_file(task, changes, mark_mutated):
     path, original, calendar, component = parsed_file(task["id"])
     if str(component.get("UID")) != task["uid"] or hashlib.sha256(original).hexdigest() != task["revision"]:
@@ -374,20 +401,27 @@ def update_file(task, changes, mark_mutated):
     temporary = None
     try:
         source_stat = path.stat()
-        attributes = {name: os.getxattr(path, name) for name in os.listxattr(path)}
+        attributes = read_xattrs(path)
         with tempfile.NamedTemporaryFile(dir=path.parent, prefix=".todoman-", delete=False) as stream:
             temporary = stream.name
             stream.write(encoded)
             stream.flush()
             os.fchown(stream.fileno(), source_stat.st_uid, source_stat.st_gid)
             os.fchmod(stream.fileno(), stat.S_IMODE(source_stat.st_mode))
-            for name in os.listxattr(stream.fileno()):
-                if name not in attributes:
-                    os.removexattr(stream.fileno(), name)
-            for name, value in attributes.items():
-                os.setxattr(stream.fileno(), name, value)
+            if attributes is not None:
+                dest_attributes = read_xattrs(stream.fileno())
+                if dest_attributes is None:
+                    saved_attributes = {} if not attributes else None
+                else:
+                    for name in dest_attributes:
+                        if name not in attributes:
+                            os.removexattr(stream.fileno(), name)
+                    for name, value in attributes.items():
+                        os.setxattr(stream.fileno(), name, value)
+                    saved_attributes = read_xattrs(stream.fileno())
+            else:
+                saved_attributes = None
             saved_stat = os.fstat(stream.fileno())
-            saved_attributes = {name: os.getxattr(stream.fileno(), name) for name in os.listxattr(stream.fileno())}
             if (saved_stat.st_uid, saved_stat.st_gid, stat.S_IMODE(saved_stat.st_mode), saved_attributes) != (source_stat.st_uid, source_stat.st_gid, stat.S_IMODE(source_stat.st_mode), attributes):
                 fail("unsupported", "Task file metadata could not be preserved.")
             os.fsync(stream.fileno())
@@ -427,7 +461,8 @@ def run(request):
             fail("validation", "Invalid list filter or sort field.")
         available = cli_json("lists")
         tasks, unsupported = [], []
-        for row in rows(sort):
+        listed_rows, startable = list_rows(sort)
+        for row in listed_rows:
             if watched and row.get("list", "").casefold() not in {item.casefold() for item in watched}:
                 continue
             try:
@@ -436,7 +471,7 @@ def run(request):
                 if error.code != "unsupported":
                     raise
                 unsupported.append({"id": row.get("id"), "list": row.get("list"), "message": error.message})
-        return {"ok": True, "tasks": tasks, "lists": available, "unsupported": unsupported}
+        return {"ok": True, "tasks": tasks, "lists": available, "unsupported": unsupported, "startable": startable}
     if action == "detail":
         return {"ok": True, "task": identity(request, False)}
     if action not in ("create", "save", "complete", "cancel", "reopen", "delete", "move", "copy"):

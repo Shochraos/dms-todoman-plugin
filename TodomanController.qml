@@ -7,6 +7,8 @@ Item {
     property string watchedLists: ""
     property string sortField: "due"
     property string defaultList: ""
+    property string futureTasks: "config"
+    property bool todomanStartable: false
     property bool showCompleted: false
     property var tasks: []
     property var lists: []
@@ -38,7 +40,9 @@ Item {
     readonly property bool invalidDates: Object.keys(dateInputs).some(function(k) { return !dateInputs[k].valid })
     readonly property bool editing: draft !== null
     readonly property bool dirty: editing && (invalidDates || JSON.stringify(draft) !== JSON.stringify(draftBaseline))
-    readonly property int openCount: tasks.filter(function(t) { return controller.isOpen(t) }).length
+    readonly property bool hideFutureTasks: futureTasks === "hide" || (futureTasks !== "show" && todomanStartable)
+    readonly property int hiddenFutureCount: hideFutureTasks ? tasks.filter(function(t) { return controller.isOpen(t) && controller.isFuture(t) }).length : 0
+    readonly property int openCount: tasks.filter(function(t) { return controller.isOpen(t) && controller.visibleByStart(t) }).length
     readonly property string countText: String(openCount) + (unsupported.length ? "+" : "")
     readonly property var viewLists: lists.filter(function(name) { var w = controller.watched().map(function(s) { return s.toLowerCase() }); return !w.length || w.indexOf(name.toLowerCase()) >= 0 })
     readonly property var visibleTasks: filteredTasks()
@@ -51,6 +55,20 @@ Item {
     function clearError() { operationError = "" }
     function isOpen(task) { return !task.completed && task.status !== "COMPLETED" && task.status !== "CANCELLED" }
     function watched() { return watchedLists.split(",").map(function(s) { return s.trim() }).filter(function(s) { return s.length > 0 }) }
+    function startTime(value) {
+        if (!value) return NaN
+        if (value.kind === "date") {
+            var p = value.value.split("-")
+            return new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2])).getTime()
+        }
+        return new Date(value.value).getTime()
+    }
+    function isFuture(task) {
+        if (!task || !task.start) return false
+        var t = startTime(task.start)
+        return isFinite(t) && t > clock
+    }
+    function visibleByStart(task) { return !hideFutureTasks || !isOpen(task) || !isFuture(task) }
     function dueTime(value) {
         if (!value) return NaN
         if (value.kind === "date") {
@@ -59,10 +77,11 @@ Item {
         }
         return new Date(value.value).getTime()
     }
-    function overdue(task) { return isOpen(task) && task.due && dueTime(task.due) < clock }
+    function overdue(task) { return isOpen(task) && !!task.due && dueTime(task.due) <= clock }
     function filteredTasks() {
         var needle = search.toLowerCase().trim()
         return tasks.filter(function(t) {
+            if (!visibleByStart(t)) return false
             if (viewList && t.list !== viewList) return false
             if (viewStatus === "open" && !isOpen(t)) return false
             if (viewStatus !== "open" && viewStatus !== "all" && t.status !== viewStatus) return false
@@ -79,16 +98,22 @@ Item {
             var key = !isOpen(t) ? "closed" : !t.due ? "none" : overdue(t) ? "overdue" : new Date(dueTime(t.due)).toDateString() === today ? "today" : "upcoming"
             buckets[key].push(t)
         })
-        return [{key:"overdue", label:"Overdue"}, {key:"today", label:"Today"}, {key:"upcoming", label:"Upcoming"}, {key:"none", label:"No due date"}, {key:"closed", label:"Completed and cancelled"}].filter(function(g) { g.tasks = buckets[g.key]; return g.tasks.length })
+        var definitions = [{key:"overdue", label:"Overdue"}, {key:"today", label:"Today"}, {key:"upcoming", label:"Upcoming"}, {key:"none", label:"No due date"}, {key:"closed", label:"Completed and cancelled"}]
+        var result = []
+        for (var i = 0; i < definitions.length; i++) {
+            var group = definitions[i]
+            if (buckets[group.key].length) result.push({key:group.key, label:group.label, tasks:buckets[group.key]})
+        }
+        return result
     }
     function nearestTask() {
         var now = clock, future = null, past = null
         tasks.forEach(function(t) {
-            if (!isOpen(t) || !t.due) return
+            if (!isOpen(t) || !visibleByStart(t) || !t.due) return
             var n = dueTime(t.due)
             if (!isFinite(n)) return
-            if (n >= now && (!future || n < dueTime(future.due))) future = t
-            if (n < now && (!past || n > dueTime(past.due))) past = t
+            if (n > now && (!future || n < dueTime(future.due))) future = t
+            if (n <= now && (!past || n > dueTime(past.due))) past = t
         })
         return future || past
     }
@@ -101,6 +126,7 @@ Item {
         return Math.floor(Math.ceil(m / 60) / 24) + "d" + (shortForm ? "" : " " + (Math.ceil(m / 60) % 24) + "h")
     }
     function refresh(explicitRetry) {
+        clock = Date.now()
         if (busy) { refreshPending = true; return }
         recoverySnapshot = explicitRetry === true && unknownOutcome && !editing
         if (recoverySnapshot) clearError()
@@ -155,7 +181,7 @@ Item {
         if (name === "move" || name === "copy") request.target_list = target
         send(request)
     }
-    function adopt(task) { identity = {id:task.id, uid:task.uid, revision:task.revision} }
+    function adopt(task) { identity = {id:task.id, uid:task.uid, revision:task.revision, completed:!!task.completed} }
     function validTask(t) {
         return t && Number.isInteger(t.id) && typeof t.uid === "string" && !!t.uid && typeof t.revision === "string" && !!t.revision && typeof t.summary === "string" && typeof t.list === "string" && Array.isArray(t.categories) && typeof t.status === "string" && typeof t.completed === "boolean" && typeof t.recurring === "boolean" && typeof t.priority === "number" && typeof t.percent === "number" && validDate(t.start) && validDate(t.due)
     }
@@ -178,8 +204,10 @@ Item {
             } else if (result.mutated || result.code === "partial") unknownOutcome = true
             if (result.mutated) refreshPending = true
         } else if (request.action === "snapshot") {
-            if (Array.isArray(result.tasks) && result.tasks.every(validTask) && Array.isArray(result.lists) && result.lists.every(function(s) { return typeof s === "string" }) && (result.unsupported === undefined || (Array.isArray(result.unsupported) && result.unsupported.every(function(entry) { return entry && typeof entry.message === "string" })))) {
+            if (Array.isArray(result.tasks) && result.tasks.every(validTask) && Array.isArray(result.lists) && result.lists.every(function(s) { return typeof s === "string" }) && (result.unsupported === undefined || (Array.isArray(result.unsupported) && result.unsupported.every(function(entry) { return entry && typeof entry.message === "string" }))) && (result.startable === undefined || typeof result.startable === "boolean")) {
+                clock = Date.now()
                 tasks = result.tasks; lists = result.lists; unsupported = result.unsupported || []
+                if (typeof result.startable === "boolean") todomanStartable = result.startable
                 if (viewList && viewLists.indexOf(viewList) < 0) viewList = ""
                 snapshotError = ""
                 if (recoverySnapshot && !unsupported.length) unknownOutcome = false

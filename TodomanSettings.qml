@@ -43,6 +43,18 @@ PluginSettings {
         defaultValue: "due"
     }
 
+    SelectionSetting {
+        settingKey: "futureTasks"
+        label: "Future-start tasks"
+        description: "Show or hide tasks whose start date has not arrived yet"
+        options: [
+            {label: "Follow Todoman config", value: "config"},
+            {label: "Show", value: "show"},
+            {label: "Hide", value: "hide"}
+        ]
+        defaultValue: "config"
+    }
+
     ToggleSetting {
         settingKey: "showCompleted"
         label: "Show completed tasks"

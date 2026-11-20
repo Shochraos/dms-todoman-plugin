@@ -462,7 +462,7 @@ Item {
                                 id: categories
                                 property bool pending: false
                                 width: parent.width
-                                text: editor.draft?.categories.join(", ") ?? ""
+                                text: editor.draft?.categories?.join(", ") ?? ""
                                 placeholderText: "Separate with commas"
                                 Accessible.name: "Categories"
                                 Accessible.description: "Separate categories with commas."
@@ -473,7 +473,7 @@ Item {
                                     if (!pending)
                                         return;
                                     pending = false;
-                                    if (editor.draft && text !== editor.draft.categories.join(", "))
+                                    if (editor.draft && text !== (editor.draft.categories || []).join(", "))
                                         editor.controller.setField("categories", text.split(",").map(category => category.trim()).filter(category => category.length));
                                 }
                             }
@@ -519,21 +519,27 @@ Item {
                         }
 
                         Column {
+                            readonly property bool taskCompleted: !!editor.controller.identity && editor.controller.identity.completed === true
+                            readonly property bool taskCancelled: !!editor.controller.draftBaseline && editor.controller.draftBaseline.status === "CANCELLED"
+                            readonly property bool taskOpen: !taskCompleted && !taskCancelled
                             width: parent.width
                             enabled: editor.canAct && !editor.controller.confirmDelete
 
                             FlatButton {
                                 text: "Complete"
+                                visible: parent.taskOpen
                                 onClicked: editor.controller.action("complete", editor.controller.identity)
                             }
 
                             FlatButton {
                                 text: "Cancel task"
+                                visible: !parent.taskCancelled
                                 onClicked: editor.controller.action("cancel", editor.controller.identity)
                             }
 
                             FlatButton {
                                 text: "Reopen"
+                                visible: !parent.taskOpen
                                 onClicked: editor.controller.action("reopen", editor.controller.identity)
                             }
                         }
