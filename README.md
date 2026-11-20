@@ -179,4 +179,4 @@ directory to `dms` and leaves compatibility symlinks.
 
 ## License
 
-[MIT](LICENSE) © 2026 Shochraos
+Released into the public domain under [The Unlicense](UNLICENSE).
