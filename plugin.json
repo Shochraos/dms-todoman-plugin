@@ -3,7 +3,7 @@
     "name": "Todoman Tasks",
     "description": "An agenda-first task manager for DuxShell, backed by Todoman, with recurring tasks and a full task editor.",
     "version": "0.4.0",
-    "license": "MIT",
+    "license": "Unlicense",
     "author": "shochraos",
     "icon": "checklist",
     "type": "widget",
