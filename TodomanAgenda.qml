@@ -24,9 +24,12 @@ Item {
     readonly property var priorityValues: ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
     readonly property var categories: {
         const values = new Set();
-        for (const task of controller.tasks)
+        for (const task of controller.tasks) {
+            if (!controller.visibleByStart(task))
+                continue;
             for (const category of task.categories || [])
                 values.add(category);
+        }
         if (controller.category)
             values.add(controller.category);
         return Array.from(values).sort();
@@ -317,7 +320,7 @@ Item {
                 width: Math.max(0, parent.width - agenda.textInset * 2)
                 topPadding: Theme.spacingS
                 visible: agenda.controller.visibleTasks.length === 0 && !agenda.controller.error
-                text: agenda.controller.loading ? "Loading tasks…" : agenda.searchVisible && agenda.controller.search.trim() || agenda.hasFilters ? "No matching tasks." : agenda.defaultStatus === "open" ? "No open tasks." : "No tasks."
+                text: agenda.controller.loading ? "Loading tasks…" : agenda.searchVisible && agenda.controller.search.trim() || agenda.hasFilters ? "No matching tasks." : agenda.controller.hiddenFutureCount > 0 ? "No startable tasks (" + agenda.controller.hiddenFutureCount + " scheduled for later)." : agenda.defaultStatus === "open" ? "No open tasks." : "No tasks."
                 color: Theme.surfaceVariantText
                 font.pixelSize: Theme.fontSizeMedium
                 wrapMode: Text.Wrap
