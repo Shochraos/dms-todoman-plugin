@@ -17,6 +17,10 @@ PluginComponent {
         showCompleted: root.pluginData.showCompleted === true
     }
     Timer { interval: (root.pluginData.refreshInterval || 5) * 60000; repeat: true; running: true; onTriggered: taskController.refresh() }
+    function nearestSummary(task) {
+        var text = ((task && task.summary) || "").trim() || "(no summary)"
+        return text.length > 22 ? text.slice(0, 21) + "…" : text
+    }
     horizontalBarPill: Component {
         StyledRect {
             implicitWidth: barRow.implicitWidth + Theme.spacingM * 2
@@ -25,7 +29,22 @@ PluginComponent {
                 id: barRow; anchors.centerIn: parent; spacing: Theme.spacingXS
                 DIcon { name: "checklist"; size: root.iconSize; color: Theme.surfaceText; anchors.verticalCenter: parent.verticalCenter }
                 StyledText { visible: taskController.openCount > 0 || taskController.unsupported.length > 0; text: taskController.countText; color: Theme.surfaceText; font.pixelSize: Theme.fontSizeMedium; anchors.verticalCenter: parent.verticalCenter }
-                StyledText { visible: root.pluginData.showNearestTask === true && !!taskController.nearest; text: taskController.nearest ? "· " + (taskController.nearest.summary.length > 22 ? taskController.nearest.summary.slice(0, 21) + "…" : taskController.nearest.summary) + " · " + taskController.countdown(taskController.nearest, false) : ""; color: Theme.surfaceText; font.pixelSize: Theme.fontSizeMedium; anchors.verticalCenter: parent.verticalCenter }
+                StyledText {
+                    readonly property bool shown: root.pluginData.showNearestTask === true && !!taskController.nearest
+                    visible: shown
+                    text: shown ? "· " + root.nearestSummary(taskController.nearest) : ""
+                    color: Theme.surfaceText
+                    font.pixelSize: Theme.fontSizeMedium
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+                StyledText {
+                    readonly property bool shown: root.pluginData.showNearestTask === true && !!taskController.nearest
+                    visible: shown
+                    text: shown ? "· " + taskController.countdown(taskController.nearest, false) : ""
+                    color: shown && taskController.overdue(taskController.nearest) ? Theme.error : Theme.surfaceText
+                    font.pixelSize: Theme.fontSizeMedium
+                    anchors.verticalCenter: parent.verticalCenter
+                }
             }
         }
     }
@@ -36,7 +55,14 @@ PluginComponent {
                 id: barColumn; anchors.centerIn: parent; spacing: 1
                 DIcon { name: "checklist"; size: root.iconSize; color: Theme.surfaceText; anchors.horizontalCenter: parent.horizontalCenter }
                 StyledText { visible: taskController.openCount > 0 || taskController.unsupported.length > 0; text: taskController.countText; color: Theme.surfaceText; font.pixelSize: Theme.fontSizeSmall; anchors.horizontalCenter: parent.horizontalCenter }
-                StyledText { visible: root.pluginData.showNearestTask === true && !!taskController.nearest; text: taskController.countdown(taskController.nearest, true); color: Theme.surfaceVariantText; font.pixelSize: Theme.fontSizeSmall; anchors.horizontalCenter: parent.horizontalCenter }
+                StyledText {
+                    readonly property bool shown: root.pluginData.showNearestTask === true && !!taskController.nearest
+                    visible: shown
+                    text: shown ? taskController.countdown(taskController.nearest, true) : ""
+                    color: shown && taskController.overdue(taskController.nearest) ? Theme.error : Theme.surfaceVariantText
+                    font.pixelSize: Theme.fontSizeSmall
+                    anchors.horizontalCenter: parent.horizontalCenter
+                }
             }
         }
     }
