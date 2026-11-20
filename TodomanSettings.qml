@@ -9,9 +9,9 @@ PluginSettings {
     StringSetting {
         settingKey: "pythonExecutable"
         label: "Python interpreter"
-        description: "Interpreter with icalendar and python-dateutil installed"
-        placeholder: "python3"
-        defaultValue: "python3"
+        description: "Leave blank to use Todoman's Python environment, or enter a Python 3.10+ interpreter with icalendar and python-dateutil"
+        placeholder: "Auto-detect"
+        defaultValue: ""
     }
 
     StringSetting {

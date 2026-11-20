@@ -10,7 +10,7 @@ PluginComponent {
     popoutHeight: 560
     TodomanController {
         id: taskController
-        pythonExecutable: root.pluginData.pythonExecutable || "python3"
+        pythonExecutable: root.pluginData.pythonExecutable || ""
         watchedLists: root.pluginData.listFilter || ""
         defaultList: root.pluginData.defaultList || ""
         sortField: root.pluginData.sortField || "due"

@@ -11,15 +11,73 @@ import tempfile
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
+def _read_prefix(file_path, limit=1048576):
+    with open(file_path, "rb") as stream:
+        return stream.read(limit)
+
+
+def _add_todoman_site_paths():
+    import ast
+    import site
+
+    wrapped_path = os.environ.pop("TODOMAN_WRAPPED_SCRIPT", "")
+    wrapper_path = os.environ.pop("TODOMAN_WRAPPER_SCRIPT", "")
+    if not wrapped_path and not wrapper_path:
+        todo_bin = shutil.which("todo")
+        if todo_bin:
+            resolved = Path(todo_bin).resolve()
+            wrapper_path = str(resolved)
+            sibling = resolved.parent / ".todo-wrapped"
+            if sibling.is_file():
+                wrapped_path = str(sibling)
+    candidates = []
+    if wrapped_path:
+        try:
+            text = _read_prefix(wrapped_path).decode("utf-8", errors="ignore")
+            tree = ast.parse(text)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                    value = node.value
+                    if os.path.isabs(value) and ("site-packages" in value or "dist-packages" in value):
+                        candidates.append(value)
+        except Exception:
+            pass
+    if wrapper_path:
+        try:
+            raw = _read_prefix(wrapper_path)
+            if raw.startswith(b"#!"):
+                text = raw.decode("utf-8", errors="ignore")
+                for match in re.finditer(r"(/[^\s'\":;]+(?:site-packages|dist-packages))", text):
+                    candidates.append(match.group(1))
+        except Exception:
+            pass
+    seen = set()
+    for entry in candidates:
+        if entry not in seen and os.path.isdir(entry):
+            seen.add(entry)
+            site.addsitedir(entry)
+
+
 try:
     if sys.version_info < (3, 10):
         raise ImportError()
-    from zoneinfo import ZoneInfo
-    import icalendar
-    from dateutil.rrule import rrulestr
+    try:
+        from zoneinfo import ZoneInfo
+        import icalendar
+        from dateutil.rrule import rrulestr
+    except ImportError:
+        if os.environ.pop("TODOMAN_AUTO_PYTHON", "") != "1":
+            raise
+        _add_todoman_site_paths()
+        from zoneinfo import ZoneInfo
+        import icalendar
+        from dateutil.rrule import rrulestr
 except ImportError:
     print(json.dumps({"ok": False, "code": "dependency", "message": "Python 3.10 or newer with icalendar and python-dateutil is required.", "mutated": False, "task": None}))
     sys.exit(0)
+os.environ.pop("TODOMAN_AUTO_PYTHON", None)
+os.environ.pop("TODOMAN_WRAPPED_SCRIPT", None)
+os.environ.pop("TODOMAN_WRAPPER_SCRIPT", None)
 
 
 class BackendError(Exception):

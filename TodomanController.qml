@@ -3,7 +3,7 @@ import Quickshell.Io
 
 Item {
     id: controller
-    property string pythonExecutable: "python3"
+    property string pythonExecutable: ""
     property string watchedLists: ""
     property string sortField: "due"
     property string defaultList: ""
@@ -110,7 +110,14 @@ Item {
         if (busy) return
         busy = true; if (request.action !== "snapshot") clearError(); activeRequest = request
         process.output = ""; process.diagnostic = ""
-        process.command = [pythonExecutable || "python3", decodeURIComponent(Qt.resolvedUrl("todoman_backend.py").toString().replace(/^file:\/\//, ""))]
+        var configured = (pythonExecutable || "").trim()
+        var backendPath = decodeURIComponent(Qt.resolvedUrl("todoman_backend.py").toString().replace(/^file:\/\//, ""))
+        if (configured && configured !== "python3") {
+            process.command = [configured, backendPath]
+        } else {
+            var launcherPath = decodeURIComponent(Qt.resolvedUrl("run_backend.sh").toString().replace(/^file:\/\//, ""))
+            process.command = ["/bin/sh", launcherPath, backendPath]
+        }
         process.stdinEnabled = true
         process.running = true
     }
@@ -203,6 +210,7 @@ Item {
         onRunningChanged: if (!running && controller.busy && controller.activeRequest) { controller.setError("The task helper could not be started. Check the Python interpreter setting.", controller.activeRequest.action === "snapshot" ? "snapshot" : "operation"); controller.busy = false; controller.activeRequest = null; controller.loading = false; controller.requestFinished(); if (controller.refreshPending) { controller.refreshPending = false; Qt.callLater(controller.refresh) } }
     }
     Timer { interval: 60000; repeat: true; running: true; onTriggered: controller.clock = Date.now() }
+    onPythonExecutableChanged: if (ready) refresh()
     onWatchedListsChanged: if (ready) refresh()
     onSortFieldChanged: if (ready) refresh()
     onShowCompletedChanged: if (ready) viewStatus = showCompleted ? "all" : "open"
