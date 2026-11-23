@@ -3,6 +3,14 @@ set -f
 
 backend="${1:-}"
 
+case "${2:-}" in
+    ''|python3) ;;
+    *)
+        unset TODOMAN_AUTO_PYTHON TODOMAN_WRAPPED_SCRIPT TODOMAN_WRAPPER_SCRIPT
+        exec "$2" "$backend"
+        ;;
+esac
+
 is_python_name() {
     case "${1##*/}" in
         python|python3|python3.*) return 0 ;;

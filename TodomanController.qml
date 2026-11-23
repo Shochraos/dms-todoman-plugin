@@ -138,12 +138,8 @@ Item {
         process.output = ""; process.diagnostic = ""
         var configured = (pythonExecutable || "").trim()
         var backendPath = decodeURIComponent(Qt.resolvedUrl("todoman_backend.py").toString().replace(/^file:\/\//, ""))
-        if (configured && configured !== "python3") {
-            process.command = [configured, backendPath]
-        } else {
-            var launcherPath = decodeURIComponent(Qt.resolvedUrl("run_backend.sh").toString().replace(/^file:\/\//, ""))
-            process.command = ["/bin/sh", launcherPath, backendPath]
-        }
+        var launcherPath = decodeURIComponent(Qt.resolvedUrl("run_backend.sh").toString().replace(/^file:\/\//, ""))
+        process.command = ["/bin/sh", launcherPath, backendPath, configured]
         process.stdinEnabled = true
         process.running = true
     }
