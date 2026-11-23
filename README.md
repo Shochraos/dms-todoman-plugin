@@ -113,7 +113,10 @@ From a checkout, run `nix build`. The package puts `plugin.json` and the QML
 files at the output root. You can use that output as the plugin source below.
 If you use the project's `nix develop` shell or allow its `.envrc` with direnv,
 a plain `nix build` from the project root copies the package into a regular
-`result/` directory instead of creating a symlink.
+`result/` directory instead of creating a symlink. It refreshes untouched
+build output on subsequent runs. Move `result/` aside before rebuilding if
+it contains output from an older wrapper, or if you changed or added files.
+Run one build at a time per checkout and do not edit `result/` during a build.
 
 For Home Manager, add the flake input and use its default package directly:
 
