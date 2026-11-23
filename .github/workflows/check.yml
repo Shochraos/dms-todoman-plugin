@@ -20,7 +20,8 @@ jobs:
         with:
           enable_kvm: false
           set_as_trusted_user: false
-      - name: Build plugin
-        run: nix build --no-link --print-build-logs
-      - name: Test backend
-        run: nix develop --command python3 -m unittest discover -s tests
+      - name: Build and test plugin
+        run: |
+          DANK_TODOMAN_PACKAGE="$(nix build --no-link --print-out-paths --print-build-logs)"
+          export DANK_TODOMAN_PACKAGE
+          nix develop --command python3 -m unittest discover -s tests

@@ -31,11 +31,15 @@ let
     export DANK_TODOMAN_LIST_FILE_PATHS=1
     unset TODOMAN_AUTO_PYTHON TODOMAN_WRAPPED_SCRIPT TODOMAN_WRAPPER_SCRIPT
 
-    backend="$1"
     case "''${2:-}" in
-      ""|python3) exec ${backendPython}/bin/python3 "$backend" ;;
-      *) exec -- "$2" "$backend" ;;
+      ""|python3) python=${backendPython}/bin/python3 ;;
+      *) python=$2 ;;
     esac
+    shopt -s execfail
+    exec -- "$python" "$1"
+    status=$?
+    printf '%s\n' '{"ok": false, "code": "dependency", "message": "Could not start Python. Check the Python interpreter in plugin settings.", "mutated": false, "task": null}'
+    exit "$status"
   '';
 in
 runCommand "dank-todoman-${manifest.version}"
