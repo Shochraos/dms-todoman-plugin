@@ -9,25 +9,14 @@ editor. Your existing local `.ics` files remain the source of truth.
 > DuxShell's design language so it matches the rest of the
 > shell.
 
-> [!IMPORTANT]
-> Todoman and the Python parser environment are both required. A working
-> `todo` command alone does not supply the parser modules to a separate
-> Python interpreter. See [Requirements](#requirements) and
-> [Installation](#installation).
-
 ## Requirements
 
-| Requirement | Why | Notes |
-|-------------|-----|-------|
-| **Todoman ≥ 4.7** (`todo` on the shell's `PATH`) | Task discovery and native lifecycle operations | Needs a working Todoman configuration and local task directories; respects `TODOMAN_CONFIG` |
-| **DuxShell ≥ 2.1.1** | Native popout, menus and calendar controls | Declared by `requires_dms` in `plugin.json` |
-| **Python ≥ 3.10 with the packages in `requirements.txt`** | Structured iCalendar reads and field edits | Select the interpreter with `pythonExecutable`; defaults to `python3` |
-
-todoman itself reads CalDAV `VTODO`s from local `.ics` directories — typically
-kept in sync with a CalDAV server via
-[vdirsyncer](https://vdirsyncer.readthedocs.io/). Setting that up is out of scope
-here. Check that `todo list` works and that the configured Python interpreter
-can import `icalendar` and `dateutil` in the environment used by DuxShell.
+- **DuxShell ≥ 2.1.1** to load the widget.
+- **A Todoman configuration and local task directories.** The plugin respects
+  `TODOMAN_CONFIG`. Use [vdirsyncer](https://vdirsyncer.readthedocs.io/) or your
+  existing CalDAV sync setup if you want to keep those directories in sync.
+- **Todoman ≥ 4.7 and Python ≥ 3.10 with `icalendar` and `python-dateutil`.** The
+  Nix package supplies both runtimes. For a manual install, see the setup below.
 
 ## Features
 
@@ -78,11 +67,12 @@ The QML widget composes the bar, agenda, and task editor. One controller owns
 task snapshots, view filters, drafts, and serialized backend requests. It keeps
 view filtering separate from the global watched-list count.
 
-A short-lived Python helper communicates with the public `todo` CLI and parses
-the files located by `todo path`. The structured read supplies fields that
-Todoman's JSON omits, including the UID, recurrence rule, status, and date-only
-versus timed values. Field edits use an iCalendar parser rather than physical
-line replacements. The helper does not import Todoman's internal Python APIs.
+A short-lived Python helper uses the `todo` CLI for task discovery and parses
+the `.ics` files for fields the CLI omits, including the UID, recurrence rule,
+and date-only versus timed values. The Nix package includes a private build of
+Todoman that adds file paths to its JSON list output, avoiding one `todo path`
+call per task on refresh. Manual installs still use the stock CLI. The helper
+uses the same iCalendar parser for reads and field edits.
 
 Todoman retains responsibility for native completion and generating the next
 recurring occurrence. There is no plugin daemon, second task database, or sync
@@ -100,8 +90,9 @@ before retrying an operation that may already have changed a task.
 | `sortField`       | Order within each group: `due` \| `priority` \| `created_at` \| `summary` | `due` |
 | `showCompleted`   | Include done/cancelled tasks                         | `false` |
 | `showNearestTask` | Append the next due task + countdown to the bar pill | `false` |
+| `futureTasks`     | Follow Todoman's `startable` setting (`config`), or `show` / `hide` future-start open tasks | `config` |
 | `refreshInterval` | Reload interval, in minutes                          | `5`     |
-| `pythonExecutable` | Python interpreter with the parser dependencies; one executable path, not a shell command | `python3` |
+| `pythonExecutable` | Optional interpreter with the parser dependencies; one executable path, not a shell command | bundled with Nix; auto-detected otherwise |
 
 Grouping by due date is always on; `sortField` controls the order of tasks
 *within* each group.
@@ -118,43 +109,42 @@ the view to *All lists*.
 
 ### Nix flake (declarative)
 
-Add the repo as a flake input and hand it to the DMS `plugins` option — the
-attribute name must match the plugin directory and the `id` in
-`plugin.json` (`dankTodoman`):
+From a checkout, run `nix build`. The package puts `plugin.json` and the QML
+files at the output root. You can use that output as the plugin source below.
+If you use the project's `nix develop` shell or allow its `.envrc` with direnv,
+a plain `nix build` from the project root copies the package into a regular
+`result/` directory instead of creating a symlink. It refreshes untouched
+build output on subsequent runs. Move `result/` aside before rebuilding if
+it contains output from an older wrapper, or if you changed or added files.
+Run one build at a time per checkout and do not edit `result/` during a build.
+
+For Home Manager, add the flake input and use its default package directly:
 
 ```nix
 # flake.nix
-inputs.dms-todoman-plugin = {
-  url = "github:Shochraos/dms-todoman-plugin";
-  flake = false;
-};
+inputs.dms-todoman-plugin.url = "github:Shochraos/dms-todoman-plugin";
 ```
 
 ```nix
-let
-  todomanPython = pkgs.python3.withPackages (ps: [
-    ps.icalendar
-    ps.python-dateutil
-  ]);
-in {
-  home.packages = [ pkgs.todoman ];
+{
   programs.dank-material-shell.plugins.dankTodoman = {
     enable = true;
-    src = inputs.dms-todoman-plugin;
-    settings.pythonExecutable = "${todomanPython}/bin/python3";
+    src = inputs.dms-todoman-plugin.packages.${pkgs.stdenv.hostPlatform.system}.default;
   };
 }
 ```
 
-The legacy `programs.dank-material-shell` option name is an API identifier,
-not the displayed shell name. Keep the option exported by your DuxShell
-Home Manager module. These examples do not update your flake lock or activate
-the plugin automatically.
+Keep the `dankTodoman` key to retain existing placements and settings. No plugin
+registry input, separate `pkgs.todoman`, or Python setting is required for the
+widget. If you previously set `pythonExecutable` just to install the parser
+dependencies, remove that setting to use the bundled interpreter. An explicit
+custom interpreter still works. Keep your own `todoman` package if you also use
+`todo` in a terminal.
 
 ### Manual / local path
 
-Point a `home.file` / `xdg.configFile` entry (or just copy the folder) at your
-DMS plugins directory:
+Point a `home.file` / `xdg.configFile` entry (or copy the folder) at your
+DuxShell plugins directory:
 
 ```nix
 xdg.configFile."dms/plugins/dankTodoman".source = ./.;
@@ -169,8 +159,9 @@ python3 -m venv ~/.local/share/dux-todoman-python
 ```
 
 Set the plugin's **Python interpreter** setting to the absolute path of that
-environment's `bin/python`. Todoman must still be available on DuxShell's
-`PATH`; this environment installs the parser dependencies, not Todoman itself.
+environment's `bin/python`. You can also leave the setting blank if the plugin
+can find the parser modules in the environment used by `todo`. For a manual
+install, `todo` must be available on DuxShell's `PATH`.
 
 Reload or restart DuxShell after installing when you are ready for the plugin
 to load. The plugin ID remains `dankTodoman`, so existing placements and settings

@@ -3,6 +3,22 @@ set -f
 
 backend="${1:-}"
 
+python_start_error() {
+    printf '%s\n' '{"ok": false, "code": "dependency", "message": "Could not start Python. Check the Python interpreter in plugin settings.", "mutated": false, "task": null}'
+}
+
+case "${2:-}" in
+    ''|python3) ;;
+    *)
+        unset TODOMAN_AUTO_PYTHON TODOMAN_WRAPPED_SCRIPT TODOMAN_WRAPPER_SCRIPT
+        if [ -n "${BASH_VERSION:-}" ]; then shopt -s execfail; fi
+        trap python_start_error 0
+        command -v -- "$2" >/dev/null || exit 127
+        exec "$2" "$backend"
+        exit "$?"
+        ;;
+esac
+
 is_python_name() {
     case "${1##*/}" in
         python|python3|python3.*) return 0 ;;

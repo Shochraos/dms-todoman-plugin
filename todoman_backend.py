@@ -114,8 +114,8 @@ def cli_json(*arguments, config=None):
         fail("unsupported", "Todoman returned an unsupported porcelain response.")
 
 
-def parsed_file(task_id):
-    path = Path(cli("path", task_id).strip())
+def parsed_file(task_id, *, file_path=None):
+    path = Path(file_path if file_path is not None else cli("path", task_id).strip())
     try:
         data = path.read_bytes()
         calendar = icalendar.Calendar.from_ical(data)
@@ -132,13 +132,13 @@ def parsed_file(task_id):
         fail("unsupported", "The task calendar file could not be safely parsed.")
 
 
-def fixed_zone(tzid):
+def fixed_zone(tzid, *, invalid_code="validation"):
     match = re.fullmatch(r"(?:UTC|GMT)([+-])(\d{2}):(\d{2})", tzid)
     if not match:
         return None
     hours, minutes = int(match[2]), int(match[3])
     if hours > 23 or minutes > 59:
-        fail("validation", "The date or timezone is invalid.")
+        fail(invalid_code, "The date or timezone is invalid.")
     offset = timedelta(hours=hours, minutes=minutes)
     return timezone(offset if match[1] == "+" else -offset)
 
@@ -153,7 +153,7 @@ def typed_date(component, name):
     if isinstance(decoded, datetime):
         tzid = str(value.params.get("TZID", ""))
         if tzid and decoded.tzinfo is None:
-            fixed = fixed_zone(tzid)
+            fixed = fixed_zone(tzid, invalid_code="unsupported")
             if fixed is not None:
                 decoded = decoded.replace(tzinfo=fixed)
         result = {"kind": "datetime", "value": decoded.isoformat()}
@@ -165,22 +165,46 @@ def typed_date(component, name):
     fail("unsupported", "The task has an unsupported date value.")
 
 
-def task_from_row(row):
+def task_from_row(row, *, file_path=None):
     task_id = row["id"]
-    path, data, calendar, component = parsed_file(task_id)
-    categories = component.get("CATEGORIES")
-    if categories is None:
-        category_values = []
-    else:
-        groups = categories if isinstance(categories, list) else [categories]
-        category_values = [str(value) for group in groups for value in group.cats]
-    created = component.decoded("CREATED", None)
-    created_at = int(created.timestamp()) if isinstance(created, datetime) and created.tzinfo else None
-    rule = component.get("RRULE")
-    if isinstance(rule, list):
-        fail("unsupported", "The task has multiple recurrence rules.")
-    status = str(component.get("STATUS", "NEEDS-ACTION"))
-    return {"id": task_id, "uid": str(component.get("UID")), "revision": hashlib.sha256(data).hexdigest(), "list": row["list"], "list_colour": row.get("list_colour"), "summary": str(component.get("SUMMARY", "")), "description": str(component.get("DESCRIPTION", "")), "location": str(component.get("LOCATION", "")), "categories": category_values, "priority": int(component.get("PRIORITY", 0)), "status": status, "percent": int(component.get("PERCENT-COMPLETE", 0)), "completed": status != "CANCELLED" and (status == "COMPLETED" or component.get("COMPLETED") is not None), "recurring": bool(rule), "rrule": rule.to_ical().decode() if rule else "", "created_at": created_at, "start": typed_date(component, "DTSTART"), "due": typed_date(component, "DUE")}
+    _, data, _, component = parsed_file(task_id, file_path=file_path)
+    list_name, list_colour = row["list"], row.get("list_colour")
+    revision = hashlib.sha256(data).hexdigest()
+    try:
+        categories = component.get("CATEGORIES")
+        if categories is None:
+            category_values = []
+        else:
+            groups = categories if isinstance(categories, list) else [categories]
+            category_values = [str(value) for group in groups for value in group.cats]
+        created = component.decoded("CREATED", None)
+        created_at = int(created.timestamp()) if isinstance(created, datetime) and created.tzinfo else None
+        rule = component.get("RRULE")
+        if isinstance(rule, list):
+            fail("unsupported", "The task has multiple recurrence rules.")
+        status = str(component.get("STATUS", "NEEDS-ACTION"))
+        return {
+            "id": task_id,
+            "uid": str(component.get("UID")),
+            "revision": revision,
+            "list": list_name,
+            "list_colour": list_colour,
+            "summary": str(component.get("SUMMARY", "")),
+            "description": str(component.get("DESCRIPTION", "")),
+            "location": str(component.get("LOCATION", "")),
+            "categories": category_values,
+            "priority": int(component.get("PRIORITY", 0)),
+            "status": status,
+            "percent": int(component.get("PERCENT-COMPLETE", 0)),
+            "completed": status != "CANCELLED" and (status == "COMPLETED" or component.get("COMPLETED") is not None),
+            "recurring": bool(rule),
+            "rrule": rule.to_ical().decode() if rule else "",
+            "created_at": created_at,
+            "start": typed_date(component, "DTSTART"),
+            "due": typed_date(component, "DUE"),
+        }
+    except (AttributeError, OverflowError, TypeError, ValueError):
+        fail("unsupported", "The task has malformed calendar properties.")
 
 
 def config_path():
@@ -459,14 +483,18 @@ def run(request):
         sort = request.get("sort", "due")
         if not isinstance(watched, list) or any(not isinstance(item, str) for item in watched) or sort not in ("due", "priority", "created_at", "summary"):
             fail("validation", "Invalid list filter or sort field.")
+        watched = {item.casefold() for item in watched}
         available = cli_json("lists")
         tasks, unsupported = [], []
         listed_rows, startable = list_rows(sort)
         for row in listed_rows:
-            if watched and row.get("list", "").casefold() not in {item.casefold() for item in watched}:
+            if watched and row.get("list", "").casefold() not in watched:
                 continue
+            file_path = row.get("file_path")
+            if not isinstance(file_path, str) or not file_path:
+                file_path = None
             try:
-                tasks.append(task_from_row(row))
+                tasks.append(task_from_row(row, file_path=file_path))
             except BackendError as error:
                 if error.code != "unsupported":
                     raise
