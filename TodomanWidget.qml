@@ -55,7 +55,7 @@ PluginComponent {
         sourceComponent: PanelWindow {
             id: preview
 
-            readonly property var placement: root.previewAnchor()
+            property var placement: root.previewAnchor()
             readonly property int edge: placement.position
             readonly property var trigger: placement.trigger
             readonly property var due: root.previewTask?.due
@@ -86,6 +86,17 @@ PluginComponent {
 
             function boundedMargin(offset, available, size) {
                 return Math.round(Math.max(Theme.spacingS, Math.min(offset, available - size - Theme.spacingS)))
+            }
+
+            Timer {
+                interval: 100
+                running: preview.visible
+                repeat: true
+                onTriggered: {
+                    const next = root.previewAnchor()
+                    if (next.screen !== preview.screen || next.position !== preview.edge || next.trigger.x !== preview.trigger.x || next.trigger.y !== preview.trigger.y || next.trigger.width !== preview.trigger.width)
+                        preview.placement = next
+                }
             }
 
             Rectangle {
@@ -178,7 +189,7 @@ PluginComponent {
             StyledText {
                 visible: root.showBarCountdown
                 width: Math.min(implicitWidth, 180)
-                text: root.showBarCountdown ? root.previewTitle : ""
+                text: root.showBarCountdown ? root.previewTitle.replace(/[\r\n\u2028\u2029]+/g, " ") : ""
                 wrapMode: Text.NoWrap
                 elide: Text.ElideRight
                 color: Theme.surfaceText
