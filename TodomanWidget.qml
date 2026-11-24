@@ -8,6 +8,12 @@ PluginComponent {
     pluginId: "dankTodoman"
     popoutWidth: 440
     popoutHeight: 560
+
+    readonly property bool showBarCount: taskController.openCount > 0 || taskController.unsupported.length > 0
+    readonly property bool showBarCountdown: root.pluginData.showNearestTask === true && !!taskController.nearest
+    readonly property color barIconColor: showBarCount ? Theme.primary : Theme.widgetIconColor
+    readonly property color barCountdownColor: showBarCountdown && taskController.overdue(taskController.nearest) ? Theme.error : Theme.primary
+
     TodomanController {
         id: taskController
         pythonExecutable: root.pluginData.pythonExecutable || ""
@@ -18,54 +24,75 @@ PluginComponent {
         showCompleted: root.pluginData.showCompleted === true
     }
     Timer { interval: Math.max(1, Number(root.pluginData.refreshInterval) || 5) * 60000; repeat: true; running: true; onTriggered: taskController.refresh() }
-    function nearestSummary(task) {
-        var text = ((task && task.summary) || "").trim() || "(no summary)"
-        return text.length > 22 ? text.slice(0, 21) + "…" : text
-    }
     horizontalBarPill: Component {
-        StyledRect {
-            implicitWidth: barRow.implicitWidth + Theme.spacingM * 2
-            height: parent.widgetThickness; radius: Theme.cornerRadius; color: Theme.surfaceContainerHigh
-            Row {
-                id: barRow; anchors.centerIn: parent; spacing: Theme.spacingXS
-                DIcon { name: "checklist"; size: root.iconSize; color: taskController.openCount > 0 || taskController.unsupported.length > 0 ? Theme.surfaceText : Theme.surfaceVariantText; anchors.verticalCenter: parent.verticalCenter }
-                StyledText { visible: taskController.openCount > 0 || taskController.unsupported.length > 0; text: taskController.countText; color: Theme.surfaceText; font.pixelSize: Theme.fontSizeMedium; font.weight: Font.Medium; anchors.verticalCenter: parent.verticalCenter }
-                StyledText {
-                    readonly property bool shown: root.pluginData.showNearestTask === true && !!taskController.nearest
-                    visible: shown
-                    text: shown ? "· " + root.nearestSummary(taskController.nearest) : ""
-                    color: Theme.surfaceText
-                    font.pixelSize: Theme.fontSizeMedium
-                    font.weight: Font.Medium
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-                StyledText {
-                    readonly property bool shown: root.pluginData.showNearestTask === true && !!taskController.nearest
-                    visible: shown
-                    text: shown ? "· " + taskController.countdown(taskController.nearest, false) : ""
-                    color: shown && taskController.overdue(taskController.nearest) ? Theme.error : Theme.surfaceText
-                    font.pixelSize: Theme.fontSizeMedium
-                    font.weight: Font.Medium
-                    anchors.verticalCenter: parent.verticalCenter
-                }
+        Row {
+            spacing: Theme.spacingXS
+
+            DIcon {
+                name: "checklist"
+                size: root.iconSize
+                color: root.barIconColor
+                anchors.verticalCenter: parent.verticalCenter
+            }
+            StyledText {
+                visible: root.showBarCount
+                text: taskController.countText + (root.showBarCountdown ? " ·" : "")
+                color: Theme.surfaceText
+                font.pixelSize: root.textSize
+                anchors.verticalCenter: parent.verticalCenter
+            }
+            StyledText {
+                visible: root.showBarCountdown
+                width: Math.min(implicitWidth, 180)
+                text: root.showBarCountdown ? (taskController.nearest.summary || "").trim() || "(no summary)" : ""
+                wrapMode: Text.NoWrap
+                elide: Text.ElideRight
+                color: Theme.surfaceText
+                font.pixelSize: root.textSize
+                anchors.verticalCenter: parent.verticalCenter
+            }
+            StyledText {
+                visible: root.showBarCountdown
+                text: "•"
+                color: root.barCountdownColor
+                font.pixelSize: root.textSize
+                font.weight: Font.Medium
+                anchors.verticalCenter: parent.verticalCenter
+            }
+            StyledText {
+                visible: root.showBarCountdown
+                text: root.showBarCountdown ? taskController.countdown(taskController.nearest, false).replace(" ", "") : ""
+                color: root.barCountdownColor
+                font.pixelSize: root.textSize
+                font.weight: Font.Medium
+                anchors.verticalCenter: parent.verticalCenter
             }
         }
     }
     verticalBarPill: Component {
-        StyledRect {
-            width: parent.widgetThickness; implicitHeight: barColumn.implicitHeight + Theme.spacingM * 2; radius: Theme.cornerRadius; color: Theme.surfaceContainerHigh
-            Column {
-                id: barColumn; anchors.centerIn: parent; spacing: 1
-                DIcon { name: "checklist"; size: root.iconSize; color: taskController.openCount > 0 || taskController.unsupported.length > 0 ? Theme.surfaceText : Theme.surfaceVariantText; anchors.horizontalCenter: parent.horizontalCenter }
-                StyledText { visible: taskController.openCount > 0 || taskController.unsupported.length > 0; text: taskController.countText; color: Theme.surfaceText; font.pixelSize: Theme.fontSizeSmall; anchors.horizontalCenter: parent.horizontalCenter }
-                StyledText {
-                    readonly property bool shown: root.pluginData.showNearestTask === true && !!taskController.nearest
-                    visible: shown
-                    text: shown ? taskController.countdown(taskController.nearest, true) : ""
-                    color: shown && taskController.overdue(taskController.nearest) ? Theme.error : Theme.surfaceVariantText
-                    font.pixelSize: Theme.fontSizeSmall
-                    anchors.horizontalCenter: parent.horizontalCenter
-                }
+        Column {
+            spacing: 1
+
+            DIcon {
+                name: "checklist"
+                size: root.iconSize
+                color: root.barIconColor
+                anchors.horizontalCenter: parent.horizontalCenter
+            }
+            StyledText {
+                visible: root.showBarCount
+                text: taskController.countText
+                color: Theme.surfaceText
+                font.pixelSize: Theme.fontSizeSmall
+                anchors.horizontalCenter: parent.horizontalCenter
+            }
+            StyledText {
+                visible: root.showBarCountdown
+                text: root.showBarCountdown ? taskController.countdown(taskController.nearest, true) : ""
+                color: root.barCountdownColor
+                font.pixelSize: Theme.fontSizeSmall
+                font.weight: Font.Medium
+                anchors.horizontalCenter: parent.horizontalCenter
             }
         }
     }
