@@ -245,33 +245,74 @@ PluginComponent {
         PopoutComponent {
             id: popout
 
-            readonly property real bodyHeight: Math.max(180, root.popoutHeight - headerHeight - detailsHeight - PopoutMetrics.contentPadding * 2)
+            readonly property real bodyHeight: Math.max(180, root.popoutHeight - headerHeight - (agendaHeader.visible ? agendaHeader.height : 0) - PopoutMetrics.contentPadding * 2)
 
-            headerText: taskController.editing ? (taskController.identity ? "Edit task" : "New task") : "Tasks"
-            detailsText: taskController.editing ? "" : taskController.countText + (taskController.openCount === 1 && !taskController.unsupported.length ? " open task" : " open tasks")
-            headerActions: taskController.editing ? null : agendaActions
+            headerText: taskController.editing ? (taskController.identity ? "Edit task" : "New task") : ""
 
-            Component {
-                id: agendaActions
+            Item {
+                id: agendaHeader
+                readonly property real actionSize: width < 336 ? 32 : 36
+                readonly property bool stacked: width < 280
+                width: popout.width
+                height: stacked ? heading.implicitHeight + agendaActions.implicitHeight + Theme.spacingS * 2 : Math.max(48, heading.implicitHeight + Theme.spacingS * 2) + Theme.spacingS
+                visible: !taskController.editing
 
-                Row {
-                    spacing: Theme.spacingXS
+                Column {
+                    id: heading
+                    anchors.left: parent.left
+                    anchors.leftMargin: Theme.spacingS
+                    anchors.right: agendaHeader.stacked ? parent.right : agendaActions.left
+                    anchors.rightMargin: Theme.spacingXS
+                    anchors.top: agendaHeader.stacked ? parent.top : undefined
+                    anchors.verticalCenter: agendaHeader.stacked ? undefined : agendaActions.verticalCenter
+
+                    StyledText {
+                        width: parent.width
+                        text: "Dank Tasks"
+                        font.pixelSize: Theme.fontSizeLarge + 2
+                        font.weight: Font.Bold
+                        elide: Text.ElideRight
+                        Accessible.role: Accessible.Heading
+                    }
+
+                    StyledText {
+                        width: parent.width
+                        text: Qt.formatDate(new Date(taskController.clock), "dddd, d MMMM") + " · " + (taskController.refreshing ? "Refreshing…" : taskController.countText + " open")
+                        color: Theme.surfaceVariantText
+                        font.pixelSize: Theme.fontSizeSmall
+                        elide: Text.ElideRight
+                    }
+                }
+
+                Flow {
+                    id: agendaActions
+                    width: Math.max(0, Math.min(agendaHeader.actionSize * 5, agendaHeader.width - Theme.spacingXS * 2))
+                    anchors.right: parent.right
+                    anchors.rightMargin: Theme.spacingXS
+                    y: agendaHeader.stacked ? heading.height + Theme.spacingS : (agendaHeader.height - Theme.spacingS - height) / 2
 
                     DActionButton {
-                        buttonSize: 40
+                        buttonSize: agendaHeader.actionSize
                         iconName: "add"
                         tooltipText: "Add task"
-                        enabled: !taskController.busy && !taskController.unknownOutcome
-                        onClicked: taskController.openNew()
+                        enabled: !taskController.busy && !taskController.unknownOutcome && !taskController.pendingRowAction
+                        onClicked: {
+                            agenda.closeFilters(false);
+                            taskController.openNew();
+                        }
                     }
 
                     DActionButton {
                         id: searchAction
-                        buttonSize: 40
+                        buttonSize: agendaHeader.actionSize
                         iconName: "search"
                         iconColor: agenda.searchVisible ? Theme.primary : Theme.surfaceVariantText
                         tooltipText: agenda.searchVisible ? "Close search" : "Search tasks"
-                        onClicked: agenda.searchVisible ? agenda.closeSearch() : agenda.openSearch()
+                        onClicked: {
+                            agenda.closeFilters(false);
+                            if (agenda.searchVisible) agenda.closeSearch();
+                            else agenda.openSearch();
+                        }
 
                         Connections {
                             target: agenda
@@ -281,12 +322,12 @@ PluginComponent {
 
                     DActionButton {
                         id: filterAction
-                        buttonSize: 40
+                        buttonSize: agendaHeader.actionSize
                         iconName: "filter_list"
                         iconColor: agenda.filtersOpen || agenda.hasFilters ? Theme.primary : Theme.surfaceVariantText
                         tooltipText: agenda.filtersOpen ? "Hide filters" : "Show filters"
                         Accessible.description: agenda.hasFilters ? "Filters applied" : ""
-                        onClicked: agenda.filtersOpen = !agenda.filtersOpen
+                        onClicked: agenda.filtersOpen ? agenda.closeFilters(true) : agenda.openFilters(filterAction)
 
                         Connections {
                             target: agenda
@@ -295,11 +336,26 @@ PluginComponent {
                     }
 
                     DActionButton {
-                        buttonSize: 40
-                        iconName: "refresh"
+                        buttonSize: agendaHeader.actionSize
+                        iconName: "sync"
+                        iconColor: taskController.refreshing ? Theme.primary : Theme.surfaceVariantText
                         tooltipText: "Refresh tasks"
                         enabled: !taskController.busy
-                        onClicked: taskController.refresh(true)
+                        onClicked: {
+                            agenda.closeFilters(false);
+                            taskController.refresh(true);
+                        }
+                    }
+
+                    DActionButton {
+                        buttonSize: agendaHeader.actionSize
+                        iconName: "close"
+                        tooltipText: "Close tasks"
+                        onClicked: {
+                            taskController.releaseAgenda(agenda);
+                            if (popout.closePopout) popout.closePopout();
+                            else root.closePopout();
+                        }
                     }
                 }
             }
@@ -308,11 +364,11 @@ PluginComponent {
                 if (taskController.editing)
                     return;
                 if (event.key === Qt.Key_F && event.modifiers === Qt.ControlModifier) {
+                    agenda.closeFilters(false);
                     agenda.openSearch();
                     event.accepted = true;
                 } else if (event.key === Qt.Key_Escape && agenda.filtersOpen) {
-                    agenda.filtersOpen = false;
-                    agenda.filterFocusRequested();
+                    agenda.closeFilters(true);
                     event.accepted = true;
                 }
             }
@@ -325,7 +381,8 @@ PluginComponent {
                     if (popout.parentPopout && popout.parentPopout.shouldBeVisible) {
                         taskController.refresh();
                     } else {
-                        agenda.filtersOpen = false;
+                        taskController.releaseAgenda(agenda);
+                        agenda.closeFilters(false);
                         agenda.searchOpen = false;
                     }
                 }
