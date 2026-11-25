@@ -28,6 +28,14 @@ Item {
     property var activeRequest: null
     property bool refreshPending: false
     property bool recoverySnapshot: false
+    readonly property string backendScope: JSON.stringify([pythonExecutable, watchedLists, sortField])
+    property string snapshotScope: ""
+    property string publishedScope: ""
+    readonly property bool refreshing: busy && activeRequest?.action === "snapshot"
+    property var pendingRowAction: null
+    property Item pressedRow: null
+    property var deferredSnapshot: null
+    readonly property bool rowActionsAvailable: !editing && !unknownOutcome && !pendingRowAction && publishedScope === backendScope && (!busy || refreshing)
     property var draft: null
     property var draftBaseline: null
     property var identity: null
@@ -126,8 +134,9 @@ Item {
         return Math.floor(Math.ceil(m / 60) / 24) + "d" + (shortForm ? "" : " " + (Math.ceil(m / 60) % 24) + "h")
     }
     function refresh(explicitRetry) {
-        clock = Date.now()
-        if (busy) { refreshPending = true; return }
+        if (busy || pendingRowAction) { refreshPending = true; return }
+        if (!pressedRow) clock = Date.now()
+        snapshotScope = backendScope
         recoverySnapshot = explicitRetry === true && unknownOutcome && !editing
         if (recoverySnapshot) clearError()
         send({action:"snapshot", lists:watched(), sort:sortField})
@@ -144,12 +153,65 @@ Item {
         process.running = true
     }
     function openNew() {
-        if (busy || editing || unknownOutcome) return
+        if (busy || editing || unknownOutcome || pendingRowAction) return
         identity = null; clearError(); editorSession++
         draft = {summary:"", list:viewList || defaultList || "", description:"", location:"", categories:[], priority:0, status:"NEEDS-ACTION", percent:0, start:null, due:null, rrule:""}
         draftBaseline = clone(draft)
     }
     function openTask(task) { if (!busy && !editing && !unknownOutcome) send({action:"detail", id:task.id, uid:task.uid}) }
+    function requestRowAction(name, task, agenda) {
+        if (!rowActionsAvailable || !agenda?.visible || !task || (name !== "detail" && name !== "complete") || (name === "complete" && !isOpen(task)))
+            return
+        if (refreshing) {
+            pendingRowAction = {name, uid: task.uid, list: task.list, revision: task.revision, scope: backendScope, agenda}
+            return
+        }
+        dispatchRowAction(name, task)
+    }
+    function cancelPendingRowAction() { pendingRowAction = null }
+    function setRowPressed(row, pressed) {
+        if (pressed) {
+            pressedRow = row
+        } else if (pressedRow === row) {
+            pressedRow = null
+            if (deferredSnapshot) Qt.callLater(controller.publishDeferredSnapshot)
+        }
+    }
+    function releaseAgenda(agenda) {
+        if (pendingRowAction?.agenda === agenda) cancelPendingRowAction()
+        if (pressedRow?.ownerAgenda === agenda) setRowPressed(pressedRow, false)
+    }
+    function publishDeferredSnapshot() {
+        if (pressedRow || !deferredSnapshot) return
+        const {code, output} = deferredSnapshot
+        deferredSnapshot = null
+        finish(code, output)
+    }
+    function dispatchRowAction(name, task) {
+        if (name === "detail") openTask(task)
+        else action("complete", task)
+    }
+    function drainRequests() {
+        if (busy) return
+        const intent = pendingRowAction
+        if (intent) {
+            if (intent.agenda?.visible && !editing && !unknownOutcome && intent.scope === backendScope && publishedScope === backendScope) {
+                const matches = tasks.filter(task => task.uid === intent.uid && task.list === intent.list)
+                const task = matches.length === 1 ? matches[0] : null
+                if (task && task.revision === intent.revision && (intent.name !== "complete" || isOpen(task))) {
+                    dispatchRowAction(intent.name, task)
+                    cancelPendingRowAction()
+                    return
+                }
+                setError("The task changed during refresh. Choose it again.", "operation")
+            }
+            cancelPendingRowAction()
+        }
+        if (refreshPending) {
+            refreshPending = false
+            refresh()
+        }
+    }
     function setField(name, value) {
         var copy = clone(draft); copy[name] = value
         if (name === "status" && value === "COMPLETED") copy.percent = 100
@@ -185,28 +247,38 @@ Item {
     function finish(code, output) {
         var request = activeRequest, result = null
         if (!request) return
+        if (request.action === "snapshot" && pressedRow) {
+            deferredSnapshot = {code, output}
+            return
+        }
+        let completeSnapshot = false
         try { result = JSON.parse(output.trim()) } catch (e) {}
-        busy = false; activeRequest = null; loading = false
         if (code !== 0 && result && result.ok) result = null
         if (!result || typeof result.ok !== "boolean") {
             setError("The task helper did not return a valid response.", request.action === "snapshot" ? "snapshot" : "operation")
             if (request.action !== "snapshot" && request.action !== "detail") unknownOutcome = true
         } else if (!result.ok) {
             setError(result.message || "The task operation failed.", request.action === "snapshot" ? "snapshot" : "operation")
-            if (result.mutated && validTask(result.task)) {
+            const readableWrite = result.mutated && validTask(result.task)
+            if (result.code === "partial" || (result.mutated && !readableWrite)) unknownOutcome = true
+            if (readableWrite) {
                 adopt(result.task)
                 if (draft && request.action === "create" && !draft.list) { var updated = clone(draft); updated.list = result.task.list; draft = updated }
                 if (draft) draftBaseline = fields(result.task)
-            } else if (result.mutated || result.code === "partial") unknownOutcome = true
+            }
             if (result.mutated) refreshPending = true
         } else if (request.action === "snapshot") {
-            if (Array.isArray(result.tasks) && result.tasks.every(validTask) && Array.isArray(result.lists) && result.lists.every(function(s) { return typeof s === "string" }) && (result.unsupported === undefined || (Array.isArray(result.unsupported) && result.unsupported.every(function(entry) { return entry && typeof entry.message === "string" }))) && (result.startable === undefined || typeof result.startable === "boolean")) {
+            if (snapshotScope !== backendScope) {
+                refreshPending = true
+            } else if (Array.isArray(result.tasks) && result.tasks.every(validTask) && Array.isArray(result.lists) && result.lists.every(function(s) { return typeof s === "string" }) && (result.unsupported === undefined || (Array.isArray(result.unsupported) && result.unsupported.every(function(entry) { return entry && typeof entry.message === "string" }))) && (result.startable === undefined || typeof result.startable === "boolean")) {
                 clock = Date.now()
                 tasks = result.tasks; lists = result.lists; unsupported = result.unsupported || []
+                publishedScope = snapshotScope
+                completeSnapshot = !unsupported.length
                 if (typeof result.startable === "boolean") todomanStartable = result.startable
                 if (viewList && viewLists.indexOf(viewList) < 0) viewList = ""
                 snapshotError = ""
-                if (recoverySnapshot && !unsupported.length) unknownOutcome = false
+                if (recoverySnapshot && completeSnapshot) unknownOutcome = false
             }
             else setError("The task helper returned an incomplete snapshot.", "snapshot")
         } else if (request.action === "detail") {
@@ -219,8 +291,13 @@ Item {
                 refreshPending = true
             } else { setError("The helper returned an invalid write result. Refresh and reopen before retrying.", "operation"); unknownOutcome = true; refreshPending = true }
         }
+        if (request.action === "snapshot" && pendingRowAction && !completeSnapshot) {
+            cancelPendingRowAction()
+            if (!snapshotError) setError("Refresh was incomplete. Choose the task again.", "operation")
+        }
+        activeRequest = null; busy = false; loading = false
         requestFinished()
-        if (refreshPending) { refreshPending = false; Qt.callLater(refresh) }
+        if (pendingRowAction || refreshPending) Qt.callLater(controller.drainRequests)
     }
     function fields(t) { return {summary:t.summary || "", list:t.list || "", description:t.description || "", location:t.location || "", categories:t.categories || [], priority:t.priority || 0, status:t.status || "NEEDS-ACTION", percent:t.percent || 0, start:t.start || null, due:t.due || null, rrule:t.rrule || ""} }
     Process {
@@ -231,12 +308,25 @@ Item {
         stderr: SplitParser { onRead: data => { process.diagnostic = (process.diagnostic + data + "\n").slice(-4096) } }
         onStarted: { write(JSON.stringify(controller.activeRequest)); stdinEnabled = false }
         onExited: (exitCode, exitStatus) => controller.finish(exitCode, output)
-        onRunningChanged: if (!running && controller.busy && controller.activeRequest) { controller.setError("The task helper could not be started. Check the Python interpreter setting.", controller.activeRequest.action === "snapshot" ? "snapshot" : "operation"); controller.busy = false; controller.activeRequest = null; controller.loading = false; controller.requestFinished(); if (controller.refreshPending) { controller.refreshPending = false; Qt.callLater(controller.refresh) } }
+        onRunningChanged: {
+            if (running || !controller.busy || !controller.activeRequest || controller.deferredSnapshot) return
+            controller.setError("The task helper could not be started. Check the Python interpreter setting.", controller.activeRequest.action === "snapshot" ? "snapshot" : "operation")
+            controller.cancelPendingRowAction()
+            controller.busy = false; controller.activeRequest = null; controller.loading = false
+            controller.requestFinished()
+            if (controller.refreshPending) Qt.callLater(controller.drainRequests)
+        }
     }
-    Timer { interval: 60000; repeat: true; running: true; onTriggered: controller.clock = Date.now() }
+    Timer { interval: 60000; repeat: true; running: true; onTriggered: if (!controller.pressedRow) controller.clock = Date.now() }
     onPythonExecutableChanged: if (ready) refresh()
     onWatchedListsChanged: if (ready) refresh()
     onSortFieldChanged: if (ready) refresh()
+    onBackendScopeChanged: {
+        if (pendingRowAction) {
+            cancelPendingRowAction()
+            setError("Task settings changed. Choose the task again.", "operation")
+        }
+    }
     onShowCompletedChanged: if (ready) viewStatus = showCompleted ? "all" : "open"
     Component.onCompleted: { viewStatus = showCompleted ? "all" : "open"; ready = true; refresh() }
 }

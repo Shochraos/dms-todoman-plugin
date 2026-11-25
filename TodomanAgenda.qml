@@ -10,6 +10,7 @@ Item {
     required property var controller
     property bool searchOpen: false
     property bool filtersOpen: false
+    property Item filterAnchor: null
     readonly property bool searchVisible: searchOpen || controller.search !== ""
     readonly property real textInset: Theme.spacingS
     readonly property string defaultStatus: controller.showCompleted ? "all" : "open"
@@ -36,12 +37,30 @@ Item {
     }
     readonly property bool hasFilters: filterFields.some(field => controller[field.field] !== defaultFilterValue(field.field))
     readonly property Item focusedItem: agenda.Window.window?.activeFocusItem ?? null
+    readonly property var nextTask: {
+        let next = null;
+        let nearestDue = Infinity;
+        for (const task of controller.visibleTasks) {
+            if (!controller.isOpen(task) || !task.due)
+                continue;
+            const due = controller.dueTime(task.due);
+            if (due > controller.clock && due < nearestDue) {
+                next = task;
+                nearestDue = due;
+            }
+        }
+        return next;
+    }
     readonly property var sections: {
         const result = [];
         const tomorrow = new Date(controller.clock);
         tomorrow.setDate(tomorrow.getDate() + 1);
         const tomorrowKey = tomorrow.toDateString();
         for (const group of controller.groups) {
+            if (group.key === "today") {
+                result.push({key: group.key, label: "Today · " + Qt.formatDate(new Date(controller.clock), "dddd d MMMM"), tasks: group.tasks});
+                continue;
+            }
             if (group.key !== "upcoming" || controller.sortField !== "due") {
                 result.push(group);
                 continue;
@@ -101,20 +120,44 @@ Item {
         searchClosed();
     }
 
+    function openFilters(anchor: Item) {
+        filterAnchor = anchor;
+        filtersOpen = true;
+        scroller.stopMomentum();
+        menuScroll.contentY = 0;
+        filterRows.itemAt(0)?.picker.focusTarget.forceActiveFocus(Qt.TabFocusReason);
+    }
+
+    function closeFilters(restoreFocus: bool) {
+        if (!filtersOpen)
+            return;
+        filtersOpen = false;
+        filterAnchor = null;
+        if (restoreFocus)
+            filterFocusRequested();
+    }
+
     function revealFocusedItem() {
         const item = focusedItem;
         for (let ancestor = item; ancestor; ancestor = ancestor.parent) {
-            if (ancestor === scroller.contentItem) {
-                const top = item.mapToItem(scroller.contentItem, 0, 0).y;
-                scroller.stopMomentum();
-                scroller.revealRange(top - Theme.spacingXS, top + item.height + Theme.spacingXS);
+            const viewport = ancestor === scroller.contentItem ? scroller : ancestor === menuScroll.contentItem ? menuScroll : null;
+            if (viewport) {
+                const top = item.mapToItem(viewport.contentItem, 0, 0).y;
+                viewport.stopMomentum();
+                viewport.revealRange(top - Theme.spacingXS, top + item.height + Theme.spacingXS);
                 break;
             }
         }
     }
 
-    onFiltersOpenChanged: if (filtersOpen) scrollToTop()
     onFocusedItemChanged: if (visible && focusedItem) revealFocusedItem()
+    onVisibleChanged: {
+        if (!visible) {
+            controller.releaseAgenda(agenda);
+            closeFilters(false);
+        }
+    }
+    Component.onDestruction: controller?.releaseAgenda(agenda)
 
     Connections {
         target: agenda.controller
@@ -131,6 +174,7 @@ Item {
         width: parent.width
         height: agenda.searchVisible ? searchField.implicitHeight + Theme.spacingS : 0
         visible: agenda.searchVisible
+        enabled: !agenda.filtersOpen
 
         DSearchField {
             id: searchField
@@ -163,18 +207,20 @@ Item {
         anchors.top: searchStrip.bottom
         anchors.left: parent.left
         anchors.right: parent.right
+        anchors.leftMargin: agenda.textInset
+        anchors.rightMargin: agenda.textInset
         anchors.bottom: parent.bottom
         contentWidth: width
         contentHeight: content.implicitHeight
         clip: true
-        fadeEdges: false
+        enabled: !agenda.filtersOpen
         onHeightChanged: if (agenda.visible && agenda.focusedItem) Qt.callLater(agenda.revealFocusedItem)
 
         Column {
             id: content
 
             width: scroller.width
-            spacing: Theme.spacingS
+            spacing: Theme.spacingXS
 
             Column {
                 x: agenda.textInset
@@ -221,62 +267,6 @@ Item {
                         color: Theme.surfaceVariantText
                         wrapMode: Text.Wrap
                         font.pixelSize: Theme.fontSizeSmall
-                    }
-                }
-            }
-
-            Flow {
-                id: filterPanel
-
-                readonly property real minimumFieldWidth: filterMetrics.advanceWidth("All categories") + Style.iconSize + Style.spacingXL * 2
-                readonly property int columns: width >= minimumFieldWidth * 2 + spacing ? 2 : 1
-                readonly property real fieldWidth: Math.max(0, (width - (columns - 1) * spacing) / columns)
-
-                x: agenda.textInset
-                width: Math.max(0, parent.width - agenda.textInset * 2)
-                spacing: Theme.spacingS
-                visible: agenda.filtersOpen
-
-                FontMetrics {
-                    id: filterMetrics
-                    font.family: Style.fontFor("ui")
-                    font.pixelSize: Style.fontSizeMedium
-                }
-
-                Repeater {
-                    model: agenda.filterFields
-
-                    delegate: Column {
-                        id: filter
-
-                        required property var modelData
-                        width: filterPanel.fieldWidth
-                        spacing: Theme.spacingXXS
-
-                        StyledText {
-                            text: filter.modelData.label
-                            color: Theme.surfaceVariantText
-                            font.pixelSize: Theme.fontSizeSmall
-                            Accessible.ignored: true
-                        }
-
-                        DDropdown {
-                            id: picker
-
-                            width: filter.width
-                            focusPolicy: Qt.StrongFocus
-                            emptyText: filter.modelData.emptyLabel
-                            Accessible.name: filter.modelData.label + " filter"
-                            Accessible.description: currentValue ? labelOf(currentValue) : emptyText
-                            optionValues: agenda.optionsFor(filter.modelData.field)
-                            options: filter.modelData.field === "viewStatus" ? agenda.statusLabels : [emptyText].concat(optionValues.slice(1))
-                            currentValue: agenda.controller[filter.modelData.field]
-                            onValueChanged: value => {
-                                agenda.controller[filter.modelData.field] = value;
-                                picker.currentValue = Qt.binding(() => agenda.controller[filter.modelData.field]);
-                            }
-                            onVisibleChanged: if (!visible) closeDropdownMenu()
-                        }
                     }
                 }
             }
@@ -335,17 +325,13 @@ Item {
                     required property var modelData
                     readonly property bool isToday: modelData.key === "today"
                     width: content.width
+                    spacing: Theme.spacingXXS
 
-                    Item {
+                    Rectangle {
                         width: section.width
-                        height: Math.max(28, sectionLabel.implicitHeight + Theme.spacingS)
-
-                        Rectangle {
-                            anchors.fill: parent
-                            visible: section.isToday
-                            color: Theme.withAlpha(Theme.primary, 0.16)
-                            radius: Theme.cornerRadius / 2
-                        }
+                        height: Math.max(26, sectionLabel.implicitHeight + Theme.spacingXS * 2)
+                        color: section.isToday ? Theme.withAlpha(Theme.primary, 0.16) : Theme.surfaceContainerHigh
+                        radius: Theme.cornerRadiusS
 
                         StyledText {
                             id: sectionLabel
@@ -354,9 +340,9 @@ Item {
                             width: Math.max(0, parent.width - agenda.textInset * 2)
                             anchors.verticalCenter: parent.verticalCenter
                             text: section.modelData.label
-                            color: section.isToday ? Theme.primary : Theme.surfaceVariantText
-                            font.pixelSize: Theme.fontSizeMedium
-                            font.weight: Font.DemiBold
+                            color: section.isToday ? Theme.primary : Theme.surfaceText
+                            font.pixelSize: Theme.fontSizeSmall
+                            font.weight: Font.Medium
                             elide: Text.ElideRight
                             Accessible.role: Accessible.Heading
                         }
@@ -372,10 +358,120 @@ Item {
                             textInset: agenda.textInset
                             task: modelData
                             controller: agenda.controller
+                            ownerAgenda: agenda
+                            highlighted: modelData.id === agenda.nextTask?.id && modelData.uid === agenda.nextTask?.uid
                         }
                     }
                 }
             }
+        }
+    }
+
+    FocusScope {
+        anchors.fill: parent
+        z: 1
+        visible: agenda.filtersOpen
+
+        MouseArea {
+            anchors.fill: parent
+            onClicked: agenda.closeFilters(true)
+        }
+
+        Rectangle {
+            readonly property point anchorTop: agenda.filterAnchor ? agenda.filterAnchor.mapToItem(agenda, agenda.filterAnchor.width / 2, agenda.filterAnchor.height) : Qt.point(agenda.width, 0)
+            x: Math.max(0, Math.min(agenda.width - width - agenda.textInset, anchorTop.x - width / 2))
+            y: Math.max(0, anchorTop.y)
+            width: Math.max(0, Math.min(agenda.width - agenda.textInset * 2, Math.max(248, Theme.fontSizeMedium * 16)))
+            height: Math.min(menuContent.implicitHeight + Theme.spacingXS * 2, Math.max(0, agenda.height - y))
+            color: Theme.surfaceContainerHigh
+            radius: Theme.cornerRadiusS
+            border.width: 1
+            border.color: Theme.withAlpha(Theme.outline, 0.32)
+
+            MouseArea { anchors.fill: parent }
+
+            DFlickable {
+                id: menuScroll
+                anchors.fill: parent
+                anchors.margins: Theme.spacingXS
+                contentWidth: width
+                contentHeight: menuContent.implicitHeight
+                fadeEdges: false
+                clip: true
+                onHeightChanged: if (agenda.filtersOpen) Qt.callLater(agenda.revealFocusedItem)
+
+                Column {
+                    id: menuContent
+                    width: menuScroll.width
+
+                    Repeater {
+                        id: filterRows
+                        model: agenda.filterFields
+                        delegate: FilterRow { width: menuContent.width }
+                    }
+
+                    Rectangle {
+                        width: parent.width
+                        height: 1
+                        color: Theme.withAlpha(Theme.outline, 0.25)
+                    }
+
+                    DButton {
+                        anchors.right: parent.right
+                        text: "Reset filters"
+                        variant: "text"
+                        buttonHeight: Math.max(36, Theme.fontSizeMedium + Theme.spacingS * 2)
+                        maximumWidth: menuContent.width
+                        wrapText: true
+                        onClicked: {
+                            for (const filter of agenda.filterFields)
+                                agenda.controller[filter.field] = agenda.defaultFilterValue(filter.field);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    component FilterRow: Item {
+        id: filter
+        required property var modelData
+        property alias picker: chooser
+        height: chooser.triggerHeight
+
+        StyledText {
+            anchors.left: parent.left
+            anchors.leftMargin: Theme.spacingS
+            anchors.right: chooser.left
+            anchors.verticalCenter: parent.verticalCenter
+            text: filter.modelData.label
+            font.pixelSize: Theme.fontSizeSmall
+            font.weight: Font.Medium
+            elide: Text.ElideRight
+            Accessible.ignored: true
+        }
+
+        DDropdown {
+            id: chooser
+            anchors.right: parent.right
+            width: filter.width * 0.70
+            triggerHeight: Math.max(36, Theme.fontSizeMedium + Theme.spacingS * 2)
+            backgroundColor: "transparent"
+            normalBorderColor: "transparent"
+            focusedBorderColor: activeFocus ? Theme.primary : "transparent"
+            focusPolicy: Qt.StrongFocus
+            alignPopupRight: true
+            emptyText: filter.modelData.emptyLabel
+            Accessible.name: filter.modelData.label + " filter"
+            Accessible.description: currentValue ? labelOf(currentValue) : emptyText
+            optionValues: agenda.optionsFor(filter.modelData.field)
+            options: filter.modelData.field === "viewStatus" ? agenda.statusLabels : [emptyText].concat(optionValues.slice(1))
+            currentValue: agenda.controller[filter.modelData.field]
+            onValueChanged: value => {
+                agenda.controller[filter.modelData.field] = value;
+                chooser.currentValue = Qt.binding(() => agenda.controller[filter.modelData.field]);
+            }
+            onVisibleChanged: if (!visible) closeDropdownMenu()
         }
     }
 }
